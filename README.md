@@ -17,6 +17,15 @@ npm run dev
 
 The server listens at `http://127.0.0.1:4000` by default. Check `GET /api/v1/health` for a basic process health response. The API requires a PostgreSQL connection at startup. Configure `DATABASE_URL`, `JWT_SECRET` (at least 32 characters), and the comma-separated `CORS_ORIGINS` in `.env`. The local `.env` is ignored by Git.
 
+## Deploy to Vercel
+
+1. Import this repository into Vercel. If it is inside a monorepo, set the project Root Directory to `greenhero-api`. Vercel detects the Fastify entry point at `src/server.ts`; leave Framework Preset, Build Command, and Output Directory at their automatic settings. Node.js 24 is pinned in `package.json`.
+2. Configure `DATABASE_URL` (a PostgreSQL server reachable from Vercel), `JWT_SECRET` (at least 32 random characters), and `CORS_ORIGINS` (the exact HTTPS origin of the admin frontend; separate multiple origins with commas) in Vercel Environment Variables. Do not copy the local `localhost` database URL or `.env` to Vercel.
+3. Apply database migrations to that database separately with `npm run db:migrate`, then seed an initial account if needed with `npm run db:seed` and `SEED_USER_PASSWORD`. Neither command runs during a Vercel build.
+4. Deploy and check `GET /api/v1/health` on the deployed URL. Set the admin frontend API base URL to the deployed origin. Place the API and admin on custom subdomains of the same site when using browser refresh cookies.
+
+The Vercel function uses a small PostgreSQL pool per instance. Keep the deployment region close to the database and use a provider or pooler suitable for serverless connections. The production refresh cookie uses `Secure`, `HttpOnly`, and `SameSite=None` for cross-origin admin requests; the frontend must send credentials and its origin must be listed in `CORS_ORIGINS`.
+
 ## Admin authentication
 
 | Method | Endpoint | Purpose |
@@ -26,7 +35,7 @@ The server listens at `http://127.0.0.1:4000` by default. Check `GET /api/v1/hea
 | `POST` | `/api/v1/admin/auth/logout` | Revoke the current refresh session |
 | `GET` | `/api/v1/admin/auth/me` | Return the authenticated user and permissions |
 
-Login returns a Bearer access token in JSON and sets the `gh_refresh` cookie. Keep the access token in client memory and send it as `Authorization: Bearer <token>` on protected requests. Browser requests to refresh and logout must include credentials. The refresh token is stored only as a SHA-256 hash in `user_sessions`, rotated on use, and expires after 15 minutes; the access token expires after 5 minutes. The refresh cookie is HttpOnly and SameSite Strict. It uses Secure in production; local HTTP development omits Secure. Login is limited to five attempts per minute per IP.
+Login returns a Bearer access token in JSON and sets the `gh_refresh` cookie. Keep the access token in client memory and send it as `Authorization: Bearer <token>` on protected requests. Browser requests to refresh and logout must include credentials. The refresh token is stored only as a SHA-256 hash in `user_sessions`, rotated on use, and expires after 15 minutes; the access token expires after 5 minutes. The refresh cookie is HttpOnly. It uses Secure and SameSite None in production for a separately hosted admin frontend; local HTTP development uses SameSite Strict without Secure. Login is limited to five attempts per minute per IP.
 
 Admin route handlers can use `preHandler: app.authenticate` or `preHandler: app.requirePermission("reservations.check_in")`. The guard checks the JWT, active session, active user and role, then resolves the permission through `roles`, `role_permissions`, and `permissions`. User passwords must be created with the Argon2id helper in `src/modules/auth/password.ts`. Login requires an existing active user with a valid role in the database; this change does not create a default account.
 
@@ -59,7 +68,7 @@ Run migrations first. Set a temporary `SEED_USER_PASSWORD` of at least 5 charact
 
 ```text
 src/
-  app.ts                    Fastify instance and application plugins
+  create-app.ts             Fastify instance and application plugins
   server.ts                 Process startup and graceful shutdown
   routes/
     index.ts                Versioned route registration

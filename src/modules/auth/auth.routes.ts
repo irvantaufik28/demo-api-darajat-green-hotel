@@ -25,7 +25,7 @@ function cookieOptions(config: AppConfig, expiresAt: Date) {
   return {
     httpOnly: true,
     secure: config.nodeEnv === "production",
-    sameSite: "strict" as const,
+    sameSite: config.nodeEnv === "production" ? ("none" as const) : ("strict" as const),
     path: refreshCookiePath,
     maxAge: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000)),
   };

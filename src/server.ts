@@ -1,4 +1,4 @@
-import { buildApp } from "./app.js";
+import { buildApp } from "./create-app.js";
 import { loadConfig } from "./config/env.js";
 
 const config = loadConfig();

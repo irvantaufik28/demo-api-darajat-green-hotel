@@ -26,7 +26,7 @@ export function registerDatabase(app: FastifyInstance, config: AppConfig): void 
   };
   const pool = new Pool({
     connectionString: config.databaseUrl,
-    max: 10,
+    max: process.env.VERCEL ? 2 : 10,
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 30000,
   });
