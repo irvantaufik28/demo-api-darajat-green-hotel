@@ -1,13 +1,16 @@
 import { and, asc, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { campaignRoomTypes } from "../../db/schema/campaign_room_types.schema.js";
-import { campaignSources } from "../../db/schema/campaign_sources.schema.js";
 import { campaigns } from "../../db/schema/campaigns.schema.js";
 import { databaseErrorCode, uuidSchema } from "../master/master.shared.js";
 import {
   campaignValues,
   CampaignInputError,
   getCampaignDetail,
+  lockCampaignPriority,
+  nextTemporaryPriority,
+  normalizeCampaignPriorities,
+  reorderCampaignPriorities,
   replaceCampaignRelations,
   validateCampaign,
 } from "./campaigns.service.js";
@@ -15,14 +18,14 @@ import {
   campaignBodySchema,
   campaignParamsSchema,
   type CampaignBody,
-  type CampaignSource,
+  type CampaignChannel,
 } from "./campaigns.schemas.js";
 
 type IdParams = { id: string };
 type ListQuery = {
   search?: string;
   roomTypeId?: string;
-  source?: CampaignSource;
+  channel?: CampaignChannel;
   isActive?: boolean;
   page?: number;
   limit?: number;
@@ -58,7 +61,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
           properties: {
             search: { type: "string", maxLength: 160 },
             roomTypeId: uuidSchema,
-            source: { type: "string", enum: ["website", "phone", "walk_in", "ota"] },
+            channel: { type: "string", enum: ["website", "front_desk"] },
             isActive: { type: "boolean" },
             page: { type: "integer", minimum: 1, default: 1 },
             limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
@@ -67,26 +70,14 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request) => {
-      const { search, roomTypeId, source, isActive, page = 1, limit = 20 } = request.query;
+      const { search, roomTypeId, channel, isActive, page = 1, limit = 20 } = request.query;
       const term = search?.trim();
       const filter = and(
         term
           ? or(ilike(campaigns.name, `%${term}%`), ilike(campaigns.promoCode, `%${term}%`))
           : undefined,
         isActive === undefined ? undefined : eq(campaigns.isActive, isActive),
-        source
-          ? exists(
-              app.db
-                .select({ campaignId: campaignSources.campaignId })
-                .from(campaignSources)
-                .where(
-                  and(
-                    eq(campaignSources.campaignId, campaigns.id),
-                    eq(campaignSources.source, source),
-                  ),
-                ),
-            )
-          : undefined,
+        channel ? eq(campaigns.channel, channel) : undefined,
         roomTypeId
           ? or(
               exists(
@@ -109,7 +100,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
           .select()
           .from(campaigns)
           .where(filter)
-          .orderBy(asc(campaigns.priority), desc(campaigns.createdAt))
+          .orderBy(asc(campaigns.channel), asc(campaigns.priority), desc(campaigns.createdAt))
           .limit(limit)
           .offset((page - 1) * limit),
         app.db
@@ -118,21 +109,15 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
           .where(filter),
       ]);
       const ids = items.map((item) => item.id);
-      const [sources, roomTypeLinks] = ids.length
-        ? await Promise.all([
-            app.db.select().from(campaignSources).where(inArray(campaignSources.campaignId, ids)),
-            app.db
-              .select()
-              .from(campaignRoomTypes)
-              .where(inArray(campaignRoomTypes.campaignId, ids)),
-          ])
-        : [[], []];
+      const roomTypeLinks = ids.length
+        ? await app.db
+            .select()
+            .from(campaignRoomTypes)
+            .where(inArray(campaignRoomTypes.campaignId, ids))
+        : [];
       return {
         items: items.map((item) => ({
           ...item,
-          sources: sources
-            .filter((source) => source.campaignId === item.id)
-            .map((source) => source.source),
           roomTypeIds: roomTypeLinks
             .filter((link) => link.campaignId === item.id)
             .map((link) => link.roomTypeId),
@@ -164,10 +149,13 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       try {
         await validateCampaign(app.db, request.body);
         const id = await app.db.transaction(async (tx) => {
+          await lockCampaignPriority(tx);
+          const temporaryPriority = await nextTemporaryPriority(tx, request.body.channel);
           const [created] = await tx
             .insert(campaigns)
-            .values(campaignValues(request.body))
+            .values({ ...campaignValues(request.body), priority: temporaryPriority })
             .returning({ id: campaigns.id });
+          await reorderCampaignPriorities(tx, created.id, request.body.priority);
           await replaceCampaignRelations(tx, created.id, request.body);
           return created.id;
         });
@@ -188,20 +176,44 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       try {
         await validateCampaign(app.db, request.body);
         const [existing] = await app.db
-          .select({ priority: campaigns.priority })
+          .select({ priority: campaigns.priority, channel: campaigns.channel })
           .from(campaigns)
           .where(eq(campaigns.id, request.params.id))
           .limit(1);
         if (!existing) return reply.code(404).send(errorBody("NOT_FOUND", "Campaign not found"));
-        if (existing.priority !== request.body.priority) {
+        if (
+          existing.priority !== request.body.priority ||
+          existing.channel !== request.body.channel
+        ) {
           await app.requirePermission("campaigns.set_priority")(request, reply);
           if (reply.sent) return;
         }
         await app.db.transaction(async (tx) => {
-          await tx
-            .update(campaigns)
-            .set({ ...campaignValues(request.body), updatedAt: new Date() })
-            .where(eq(campaigns.id, request.params.id));
+          await lockCampaignPriority(tx);
+          const {
+            priority: _priority,
+            channel: _channel,
+            ...values
+          } = campaignValues(request.body);
+          if (existing.channel !== request.body.channel) {
+            const temporaryPriority = await nextTemporaryPriority(tx, request.body.channel);
+            await tx
+              .update(campaigns)
+              .set({
+                ...values,
+                channel: request.body.channel,
+                priority: temporaryPriority,
+                updatedAt: new Date(),
+              })
+              .where(eq(campaigns.id, request.params.id));
+            await normalizeCampaignPriorities(tx, existing.channel);
+          } else {
+            await tx
+              .update(campaigns)
+              .set({ ...values, updatedAt: new Date() })
+              .where(eq(campaigns.id, request.params.id));
+          }
+          await reorderCampaignPriorities(tx, request.params.id, request.body.priority);
           await replaceCampaignRelations(tx, request.params.id, request.body);
         });
         return { campaign: await getCampaignDetail(app.db, request.params.id) };
@@ -226,13 +238,12 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      const [campaign] = await app.db
-        .update(campaigns)
-        .set({ priority: request.body.priority, updatedAt: new Date() })
-        .where(eq(campaigns.id, request.params.id))
-        .returning();
-      if (!campaign) return reply.code(404).send(errorBody("NOT_FOUND", "Campaign not found"));
-      return { campaign };
+      const changed = await app.db.transaction(async (tx) => {
+        await lockCampaignPriority(tx);
+        return reorderCampaignPriorities(tx, request.params.id, request.body.priority);
+      });
+      if (!changed) return reply.code(404).send(errorBody("NOT_FOUND", "Campaign not found"));
+      return { campaign: await getCampaignDetail(app.db, request.params.id) };
     },
   );
 

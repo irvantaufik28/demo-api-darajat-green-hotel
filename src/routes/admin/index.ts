@@ -7,6 +7,9 @@ import { pricesStocksRoutes } from "../../modules/prices-stocks/prices-stocks.ro
 import { cancellationPolicyRoutes } from "../../modules/cancellation-policies/cancellation-policies.routes.js";
 import { campaignRoutes } from "../../modules/campaigns/campaigns.routes.js";
 import { experienceRoutes } from "../../modules/experiences/experiences.routes.js";
+import { guestRoutes } from "../../modules/guests/guests.routes.js";
+import { reservationListRoutes } from "../../modules/reservations/reservations-list.routes.js";
+import { reservationCreateRoutes } from "../../modules/reservations/reservations-create.routes.js";
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(authRoutes, { prefix: "/auth" });
@@ -17,4 +20,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(cancellationPolicyRoutes, { prefix: "/cancellation-policies" });
   await app.register(campaignRoutes, { prefix: "/campaigns" });
   await app.register(experienceRoutes, { prefix: "/experiences" });
+  await app.register(guestRoutes, { prefix: "/guests" });
+  await app.register(reservationListRoutes, { prefix: "/reservations" });
+  await app.register(reservationCreateRoutes, { prefix: "/reservations" });
 };

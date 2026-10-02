@@ -1,0 +1,407 @@
+{
+  "info": {
+    "name": "Green Hero Campaigns Guests Reservations",
+    "description": "Admin API examples for campaign channels, guests, reservation list, room availability, quote, and walk-in/phone creation. Select Green Hero Local environment and login in the main collection first.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Campaigns",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns?page=1&limit=20&channel=website&roomTypeId={{roomTypeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('campaignId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}"
+          }
+        },
+        {
+          "name": "Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Weekend Escape\",\n  \"promoCode\": \"WEEKEND15\",\n  \"requiresCode\": true,\n  \"bookingStart\": \"2026-10-01\",\n  \"bookingEnd\": \"2026-12-31\",\n  \"stayStart\": \"2026-10-01\",\n  \"stayEnd\": \"2026-12-31\",\n  \"discountType\": \"percent\",\n  \"discountValue\": 15,\n  \"minNights\": 2,\n  \"minRooms\": 1,\n  \"priority\": 1,\n  \"cancellationPolicyId\": \"{{cancellationPolicyId}}\",\n  \"isActive\": true,\n  \"roomTypeIds\": [\n    \"{{roomTypeId}}\"\n  ],\n  \"weekdays\": [\n    5,\n    6,\n    7\n  ],\n  \"blackoutDates\": [\n    {\n      \"dateFrom\": \"2026-12-24\",\n      \"dateTo\": \"2026-12-26\",\n      \"label\": \"Holiday peak\"\n    }\n  ],\n  \"channel\": \"website\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Set channel to website or front_desk. Each channel has its own priority order."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.campaign?.id;",
+                  "  if (id) pm.environment.set('campaignId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Weekend Escape\",\n  \"promoCode\": \"WEEKEND15\",\n  \"requiresCode\": true,\n  \"bookingStart\": \"2026-10-01\",\n  \"bookingEnd\": \"2026-12-31\",\n  \"stayStart\": \"2026-10-01\",\n  \"stayEnd\": \"2026-12-31\",\n  \"discountType\": \"percent\",\n  \"discountValue\": 15,\n  \"minNights\": 2,\n  \"minRooms\": 1,\n  \"priority\": 1,\n  \"cancellationPolicyId\": \"{{cancellationPolicyId}}\",\n  \"isActive\": true,\n  \"roomTypeIds\": [\n    \"{{roomTypeId}}\"\n  ],\n  \"weekdays\": [\n    5,\n    6,\n    7\n  ],\n  \"blackoutDates\": [\n    {\n      \"dateFrom\": \"2026-12-24\",\n      \"dateTo\": \"2026-12-26\",\n      \"label\": \"Holiday peak\"\n    }\n  ],\n  \"channel\": \"website\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Set channel to website or front_desk. Each channel has its own priority order."
+          }
+        },
+        {
+          "name": "Set Priority",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}/priority",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set Active Status",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}/status",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Guests",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/guests?page=1&limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.items?.[0]?.id;",
+                  "  if (id) pm.collectionVariables.set('guestId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/guests?search=Nabila&status=active&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/guests/{{guestId}}"
+          }
+        },
+        {
+          "name": "Reservation History",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/guests/{{guestId}}/reservations?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Update",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/guests/{{guestId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Nabila Putri\",\n  \"phone\": \"+6285711223344\",\n  \"email\": \"nabila@example.com\",\n  \"nationality\": \"Indonesian\",\n  \"address\": \"Garut\",\n  \"internalNotes\": \"Returning guest\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservations",
+      "item": [
+        {
+          "name": "List",
+          "item": [
+            {
+              "name": "All Reservations",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/api/v1/admin/reservations?page=1&limit=20"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                      "  const body = pm.response.json();",
+                      "  const id = body.items?.[0]?.id;",
+                      "  if (id) pm.collectionVariables.set('reservationId', id);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Filter Reservations",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/api/v1/admin/reservations?source=phone&reservationStatus=confirmed&paymentStatus=partial&page=1&limit=20"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create",
+          "item": [
+            {
+              "name": "Search Room Availability",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/api/v1/admin/reservations/availability?checkInDate=2026-10-10&checkOutDate=2026-10-12&adults=2&children=0&roomTypeId={{roomTypeId}}"
+              }
+            },
+            {
+              "name": "Quote Walk-in",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/v1/admin/reservations/quote",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": \"walk_in\",\n  \"checkInDate\": \"2026-10-10\",\n  \"checkOutDate\": \"2026-10-12\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Quote Phone",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/v1/admin/reservations/quote",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": \"phone\",\n  \"checkInDate\": \"2026-10-10\",\n  \"checkOutDate\": \"2026-10-12\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Create Walk-in",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/v1/admin/reservations",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": \"walk_in\",\n  \"guest\": {\n    \"fullName\": \"Nabila Putri\",\n    \"phone\": \"+6285711223344\",\n    \"email\": \"nabila@example.com\"\n  },\n  \"checkInDate\": \"2026-10-10\",\n  \"checkOutDate\": \"2026-10-12\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"adults\": 2,\n      \"children\": 0\n    }\n  ],\n  \"confirm\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                      "  const body = pm.response.json();",
+                      "  const id = body.reservation?.id;",
+                      "  if (id) pm.collectionVariables.set('reservationId', id);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Create Phone",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/v1/admin/reservations",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": \"phone\",\n  \"guest\": {\n    \"fullName\": \"Nabila Putri\",\n    \"phone\": \"+6285711223344\",\n    \"email\": \"nabila@example.com\"\n  },\n  \"checkInDate\": \"2026-10-10\",\n  \"checkOutDate\": \"2026-10-12\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"adults\": 2,\n      \"children\": 0\n    }\n  ],\n  \"confirm\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                      "  const body = pm.response.json();",
+                      "  const id = body.reservation?.id;",
+                      "  if (id) pm.collectionVariables.set('reservationId', id);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "guestId",
+      "value": ""
+    },
+    {
+      "key": "reservationId",
+      "value": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  }
+}

@@ -115,7 +115,7 @@ POST and PUT require `roomNumber`, `roomTypeId`, `operationalStatus`, and `isAct
 | PUT | `/api/v1/admin/prices-stocks/bulk` | Per changed field | Create or update all matching dates in a range, up to 366 days, atomically |
 | PUT | `/api/v1/admin/prices-stocks/bulk/rows` | Per changed field | Save different changes on up to 300 individual dates with version checks |
 
-GET accepts up to 366 inclusive dates. Unconfigured dates have `basePrice`, `sellableStock`, `minNights`, `stopSell`, `id`, and `version` set to `null`, with `isConfigured: false`. These placeholders are not saved database rows. The response includes `items`, `page`, `limit`, `total`, `roomType`, and `stockLimit`.
+GET accepts up to 366 inclusive dates. Each configured row includes `bookedRooms` (rooms held by Pending, Confirmed, or Checked-in reservations), `remainingStock` (`sellableStock` minus booked rooms), and `availableRooms` (remaining bookable rooms after operational room limits and Stop Sell). It also includes `websitePromo`, `webPrice`, `frontDeskPromo`, and `frontDeskPrice` as read-only campaign previews. Promo objects include code and minimum-stay/room conditions; a preview price is conditional until the full reservation is quoted. Fixed discounts requiring multiple nights or rooms have a null preview price because their per-date value depends on the whole booking. Unconfigured dates have `basePrice`, `sellableStock`, `minNights`, `stopSell`, `id`, `version`, `remainingStock`, `availableRooms`, and all campaign preview fields set to `null`, with `isConfigured: false`. These placeholders are not saved database rows. The response includes `items`, `page`, `limit`, `total`, `roomType`, `stockLimit`, `operationalRoomCount`, and `campaignPreviewBookingDate`.
 
 Bulk range payload example:
 
@@ -134,7 +134,7 @@ Bulk range payload example:
 
 The server expands the inclusive date range and writes matching dates in one transaction. `fields` may contain `basePrice`, `sellableStock`, `minNights`, or `stopSell`; omitted fields retain their existing value. `applicableWeekdays` defaults to all days, and `customDayPrices` overrides the general base price for selected ISO weekdays (1 = Monday, 7 = Sunday). Range updates intentionally overwrite selected fields and increment each existing row's version. If the range includes a date without a saved row, that date must receive both a price and stock explicitly; otherwise the whole request returns 400.
 
-Use `/bulk/rows` for distinct per-date edits: provide `changes` with `stayDate`, `expectedVersion`, and at least one changed field. `expectedVersion` must be `null` for an unconfigured date or match the existing row's version. A new row must include both `basePrice` and `sellableStock`; existing rows may update only selected fields. A version conflict returns 409 and rolls back the entire batch. Both write endpoints check `prices_stocks.update_price`, `prices_stocks.update_stock`, `prices_stocks.manage_minimum_night`, and `prices_stocks.manage_stop_sell` according to fields changed. Stock cannot exceed the number of active Room Numbers. Campaign promotions are separate from inventory and are not stored or calculated by this endpoint.
+Use `/bulk/rows` for distinct per-date edits: provide `changes` with `stayDate`, `expectedVersion`, and at least one changed field. `expectedVersion` must be `null` for an unconfigured date or match the existing row's version. A new row must include both `basePrice` and `sellableStock`; existing rows may update only selected fields. A version conflict returns 409 and rolls back the entire batch. Both write endpoints check `prices_stocks.update_price`, `prices_stocks.update_stock`, `prices_stocks.manage_minimum_night`, and `prices_stocks.manage_stop_sell` according to fields changed. Stock cannot exceed the number of active Room Numbers. Campaign promotions remain separate from stored inventory; the list calculates previews without writing promotional prices to the inventory table.
 
 ## Admin Cancellation Policies API
 
@@ -152,14 +152,16 @@ POST and PUT accept `policyTypeId` (from `cancellation_policy_types` Master), `a
 
 | Method | Path | Permission | Purpose |
 | --- | --- | --- | --- |
-| GET | `/api/v1/admin/campaigns` | `campaigns.view` | Paginated list; optional `search`, `source`, `roomTypeId`, `isActive`, `page`, and `limit` |
-| GET | `/api/v1/admin/campaigns/:id` | `campaigns.view` | Detail with sources, Room Types, applicable weekdays, and blackout dates |
+| GET | `/api/v1/admin/campaigns` | `campaigns.view` | Paginated list; optional `search`, `channel`, `roomTypeId`, `isActive`, `page`, and `limit` |
+| GET | `/api/v1/admin/campaigns/:id` | `campaigns.view` | Detail with channel, Room Types, applicable weekdays, and blackout dates |
 | POST | `/api/v1/admin/campaigns` | `campaigns.create` | Create campaign and relations |
-| PUT | `/api/v1/admin/campaigns/:id` | `campaigns.edit` | Replace campaign fields and relations; also requires `campaigns.set_priority` if priority changes |
+| PUT | `/api/v1/admin/campaigns/:id` | `campaigns.edit` | Replace campaign fields and relations; also requires `campaigns.set_priority` if priority or channel changes |
 | PATCH | `/api/v1/admin/campaigns/:id/priority` | `campaigns.set_priority` | Update `{ "priority": 1 }` |
 | PATCH | `/api/v1/admin/campaigns/:id/status` | `campaigns.disable` | Set `{ "isActive": false }` or `true` |
 
-POST and PUT require `name`, `requiresCode`, `discountType`, `discountValue`, `minNights`, `minRooms`, `priority`, `isActive`, `sources`, `roomTypeIds`, `weekdays`, and `blackoutDates`. Optional fields are `promoCode`, `bookingStart`, `bookingEnd`, `stayStart`, `stayEnd`, and `cancellationPolicyId`. Sources are `website`, `phone`, `walk_in`, and `ota`. Weekdays are ISO numbers 1 (Monday) through 7 (Sunday). An empty `roomTypeIds` array means all Room Types. Each blackout entry has `dateFrom`, `dateTo`, and optional `label`. A required promo code cannot be blank; discount percentages cannot exceed 100. The referenced Cancellation Policy must be active. Create and update save all relations in one transaction.
+POST and PUT require `name`, `requiresCode`, `discountType`, `discountValue`, `minNights`, `minRooms`, `priority`, `isActive`, `channel`, `roomTypeIds`, `weekdays`, and `blackoutDates`. Optional fields are `promoCode`, `bookingStart`, `bookingEnd`, `stayStart`, `stayEnd`, and `cancellationPolicyId`. Channels are `website` and `front_desk`; Front Desk applies to Phone and Walk-in, while OTA has no campaign. Weekdays are ISO numbers 1 (Monday) through 7 (Sunday). An empty `roomTypeIds` array means all Room Types. Each blackout entry has `dateFrom`, `dateTo`, and optional `label`. A required promo code cannot be blank; discount percentages cannot exceed 100. The referenced Cancellation Policy must be active. Create and update save all relations in one transaction.
+
+Campaign priority is unique within each channel (1 is highest). Creating or moving a campaign shifts priorities only in that channel. Migration `0005` normalizes existing priorities; migration `0006` separates Website and Front Desk campaigns, copies campaigns that previously applied to both, and removes OTA campaign targeting. Run migrations manually in order.
 
 ## Seed admin access
 

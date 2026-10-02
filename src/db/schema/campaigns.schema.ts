@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, integer, smallint, uuid, varchar } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  date,
+  integer,
+  smallint,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn, rupiah } from "./columns.js";
 import { cancellationPolicies } from "./cancellation_policies.schema.js";
 
@@ -21,11 +30,14 @@ export const campaigns = appSchema.table(
     minNights: smallint("min_nights").notNull().default(1),
     minRooms: smallint("min_rooms").notNull().default(1),
     priority: integer("priority").notNull().default(0),
+    channel: varchar("channel", { length: 20 }).notNull().default("website"),
     cancellationPolicyId: uuid("cancellation_policy_id").references(() => cancellationPolicies.id),
     isActive: boolean("is_active").notNull().default(true),
     ...auditTimestamps(),
   },
   (table) => [
+    uniqueIndex("campaigns_channel_priority_uq").on(table.channel, table.priority),
+    check("campaigns_channel_check", sql`${table.channel} in ('website', 'front_desk')`),
     check(
       "campaigns_values_check",
       sql`${table.discountType} in ('percent', 'fixed') and ${table.discountValue} >= 0 and ${table.minNights} >= 1 and ${table.minRooms} >= 1`,

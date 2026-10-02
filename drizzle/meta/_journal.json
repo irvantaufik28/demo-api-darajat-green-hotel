@@ -36,6 +36,20 @@
       "when": 1790961589407,
       "tag": "0004_thick_mariko_yashida",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790966468625,
+      "tag": "0005_complex_micromacro",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790967223492,
+      "tag": "0006_military_stryfe",
+      "breakpoints": true
     }
   ]
 }

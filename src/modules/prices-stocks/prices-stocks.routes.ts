@@ -1,8 +1,14 @@
-import { and, count, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, count, eq, gt, gte, inArray, lt, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
+import { reservationRooms } from "../../db/schema/reservation_rooms.schema.js";
+import { reservations } from "../../db/schema/reservations.schema.js";
 import { roomInventoryDaily } from "../../db/schema/room_inventory_daily.schema.js";
 import { roomTypes } from "../../db/schema/room_types.schema.js";
 import { roomUnits } from "../../db/schema/room_units.schema.js";
+import {
+  bookingDateJakarta,
+  previewDailyCampaignPrices,
+} from "../reservations/reservations-campaigns.service.js";
 import {
   inventoryBulkBodySchema,
   inventoryListQuerySchema,
@@ -28,6 +34,10 @@ class InventoryIncomplete extends Error {}
 function parseStayDate(value: string): Date | null {
   const date = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value ? date : null;
+}
+
+function nextDate(value: string): string {
+  return new Date(Date.parse(`${value}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
 }
 
 function dateRange(start: string, end: string): string[] | null {
@@ -89,23 +99,77 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
       if (!roomType) return reply.code(404).send(errorBody("NOT_FOUND", "Room type not found"));
 
       const visibleDates = dates.slice((page - 1) * limit, page * limit);
-      const configured = visibleDates.length
-        ? await app.db
-            .select()
-            .from(roomInventoryDaily)
-            .where(
-              and(
-                eq(roomInventoryDaily.roomTypeId, roomTypeId),
-                gte(roomInventoryDaily.stayDate, visibleDates[0]),
-                lte(roomInventoryDaily.stayDate, visibleDates[visibleDates.length - 1]),
+      const [configured, bookedRooms, [operationalRooms]] = visibleDates.length
+        ? await Promise.all([
+            app.db
+              .select()
+              .from(roomInventoryDaily)
+              .where(
+                and(
+                  eq(roomInventoryDaily.roomTypeId, roomTypeId),
+                  gte(roomInventoryDaily.stayDate, visibleDates[0]),
+                  lte(roomInventoryDaily.stayDate, visibleDates[visibleDates.length - 1]),
+                ),
               ),
-            )
-        : [];
+            app.db
+              .select({
+                checkInDate: reservations.checkInDate,
+                checkOutDate: reservations.checkOutDate,
+              })
+              .from(reservationRooms)
+              .innerJoin(reservations, eq(reservationRooms.reservationId, reservations.id))
+              .where(
+                and(
+                  eq(reservationRooms.roomTypeId, roomTypeId),
+                  inArray(reservations.reservationStatus, ["pending", "confirmed", "checked_in"]),
+                  lt(reservations.checkInDate, nextDate(visibleDates[visibleDates.length - 1])),
+                  gt(reservations.checkOutDate, visibleDates[0]),
+                ),
+              ),
+            app.db
+              .select({ total: count() })
+              .from(roomUnits)
+              .where(
+                and(
+                  eq(roomUnits.roomTypeId, roomTypeId),
+                  eq(roomUnits.isActive, true),
+                  notInArray(roomUnits.operationalStatus, ["maintenance", "out_of_service"]),
+                ),
+              ),
+          ])
+        : [[], [], [{ total: 0 }]];
       const byDate = new Map(configured.map((row) => [row.stayDate, row]));
+      const bookingDate = bookingDateJakarta();
+      const campaignPreviews = visibleDates.length
+        ? await previewDailyCampaignPrices(app.db, {
+            bookingDate,
+            roomTypeId,
+            rows: visibleDates.map((stayDate) => ({
+              stayDate,
+              basePrice: byDate.get(stayDate)?.basePrice ?? null,
+            })),
+          })
+        : [];
       const items = visibleDates.map((stayDate) => {
         const row = byDate.get(stayDate);
+        const preview = campaignPreviews.find((item) => item.stayDate === stayDate);
+        const bookedCount = bookedRooms.filter(
+          (booking) => booking.checkInDate <= stayDate && booking.checkOutDate > stayDate,
+        ).length;
         return row
-          ? { ...row, isConfigured: true }
+          ? {
+              ...row,
+              isConfigured: true,
+              bookedRooms: bookedCount,
+              remainingStock: Math.max(0, row.sellableStock - bookedCount),
+              availableRooms: row.stopSell
+                ? 0
+                : Math.max(0, Math.min(row.sellableStock, operationalRooms.total) - bookedCount),
+              websitePromo: preview?.website.promo ?? null,
+              webPrice: preview?.website.price ?? null,
+              frontDeskPromo: preview?.frontDesk.promo ?? null,
+              frontDeskPrice: preview?.frontDesk.price ?? null,
+            }
           : {
               id: null,
               roomTypeId,
@@ -116,9 +180,25 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
               stopSell: null,
               version: null,
               isConfigured: false,
+              bookedRooms: bookedCount,
+              remainingStock: null,
+              availableRooms: null,
+              websitePromo: null,
+              webPrice: null,
+              frontDeskPromo: null,
+              frontDeskPrice: null,
             };
       });
-      return { roomType, stockLimit, items, page, limit, total: dates.length };
+      return {
+        roomType,
+        stockLimit,
+        operationalRoomCount: operationalRooms.total,
+        campaignPreviewBookingDate: bookingDate,
+        items,
+        page,
+        limit,
+        total: dates.length,
+      };
     },
   );
 

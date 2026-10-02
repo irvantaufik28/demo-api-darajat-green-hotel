@@ -2,7 +2,6 @@ export * from "./audit_logs.schema.js";
 export * from "./campaign_blackout_dates.schema.js";
 export * from "./campaign_days.schema.js";
 export * from "./campaign_room_types.schema.js";
-export * from "./campaign_sources.schema.js";
 export * from "./campaigns.schema.js";
 export * from "./capacity_patterns.schema.js";
 export * from "./cancellation_policies.schema.js";

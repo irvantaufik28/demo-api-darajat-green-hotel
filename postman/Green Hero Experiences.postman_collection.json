@@ -1,0 +1,98 @@
+{
+  "info": {
+    "name": "Green Hero Experiences API",
+    "description": "Admin Experiences API. Set accessToken and an active experience category ID in the accompanying environment. Run Create Experience before requests that use experienceId.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "List Experiences",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/admin/experiences?page=1&limit=20"
+      }
+    },
+    {
+      "name": "Get Experience Detail",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/admin/experiences/{{experienceId}}"
+      }
+    },
+    {
+      "name": "Create Experience with Two Variants",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"categoryId\": \"{{experienceCategoryId}}\",\n  \"code\": \"KAMBING_GULING\",\n  \"slug\": \"kambing-guling\",\n  \"name\": \"Kambing Guling\",\n  \"description\": \"Paket kambing guling untuk acara keluarga.\",\n  \"maxQuantity\": 10,\n  \"imageUrl\": null,\n  \"isActive\": true,\n  \"variants\": [\n    {\n      \"subName\": \"Paket 1\",\n      \"description\": \"Untuk acara kecil.\",\n      \"price\": 10000\n    },\n    {\n      \"subName\": \"Paket 2\",\n      \"description\": \"Untuk acara besar.\",\n      \"price\": 20000\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/admin/experiences"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  pm.environment.set('experienceId', pm.response.json().experience.id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Update Experience Variants",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"categoryId\": \"{{experienceCategoryId}}\",\n  \"code\": \"KAMBING_GULING\",\n  \"slug\": \"kambing-guling\",\n  \"name\": \"Kambing Guling\",\n  \"description\": \"Paket kambing guling untuk acara keluarga.\",\n  \"maxQuantity\": 10,\n  \"imageUrl\": null,\n  \"isActive\": true,\n  \"variants\": [\n    {\n      \"subName\": \"Paket 1\",\n      \"description\": \"Untuk acara kecil, termasuk penyajian.\",\n      \"price\": 15000\n    },\n    {\n      \"subName\": \"Paket 2\",\n      \"description\": \"Untuk acara besar, termasuk penyajian.\",\n      \"price\": 25000\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/admin/experiences/{{experienceId}}"
+      }
+    },
+    {
+      "name": "Disable Experience",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"isActive\": false\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/admin/experiences/{{experienceId}}/status"
+      }
+    },
+    {
+      "name": "Enable Experience",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"isActive\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/admin/experiences/{{experienceId}}/status"
+      }
+    }
+  ]
+}

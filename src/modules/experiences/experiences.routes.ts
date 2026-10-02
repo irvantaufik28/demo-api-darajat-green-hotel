@@ -42,18 +42,27 @@ function validateBody(body: ExperienceBody) {
 }
 
 async function getDetail(app: Parameters<FastifyPluginAsync>[0], id: string) {
-  const [experience] = await app.db
-    .select()
+  const [row] = await app.db
+    .select({
+      experience: experiences,
+      category: {
+        id: masterItems.id,
+        code: masterItems.code,
+        name: masterItems.name,
+        isActive: masterItems.isActive,
+      },
+    })
     .from(experiences)
+    .innerJoin(masterItems, eq(experiences.categoryId, masterItems.id))
     .where(eq(experiences.id, id))
     .limit(1);
-  if (!experience) return null;
+  if (!row) return null;
   const variants = await app.db
     .select()
     .from(experienceVariants)
     .where(eq(experienceVariants.experienceId, id))
     .orderBy(asc(experienceVariants.sortOrder));
-  return { ...experience, variants };
+  return { ...row.experience, category: row.category, variants };
 }
 
 async function validateCategory(app: Parameters<FastifyPluginAsync>[0], categoryId: string) {
@@ -113,8 +122,17 @@ export const experienceRoutes: FastifyPluginAsync = async (app) => {
       );
       const [items, [count]] = await Promise.all([
         app.db
-          .select()
+          .select({
+            experience: experiences,
+            category: {
+              id: masterItems.id,
+              code: masterItems.code,
+              name: masterItems.name,
+              isActive: masterItems.isActive,
+            },
+          })
           .from(experiences)
+          .innerJoin(masterItems, eq(experiences.categoryId, masterItems.id))
           .where(filter)
           .orderBy(desc(experiences.createdAt))
           .limit(limit)
@@ -124,7 +142,7 @@ export const experienceRoutes: FastifyPluginAsync = async (app) => {
           .from(experiences)
           .where(filter),
       ]);
-      const ids = items.map((item) => item.id);
+      const ids = items.map((item) => item.experience.id);
       const variants = ids.length
         ? await app.db
             .select()
@@ -134,8 +152,9 @@ export const experienceRoutes: FastifyPluginAsync = async (app) => {
         : [];
       return {
         items: items.map((item) => ({
-          ...item,
-          variants: variants.filter((variant) => variant.experienceId === item.id),
+          ...item.experience,
+          category: item.category,
+          variants: variants.filter((variant) => variant.experienceId === item.experience.id),
         })),
         page,
         limit,
@@ -181,15 +200,13 @@ export const experienceRoutes: FastifyPluginAsync = async (app) => {
             .insert(experiences)
             .values(values(request.body, Math.min(...variants.map((variant) => variant.price))))
             .returning({ id: experiences.id });
-          await tx
-            .insert(experienceVariants)
-            .values(
-              variants.map((variant, index) => ({
-                experienceId: created.id,
-                ...variant,
-                sortOrder: index,
-              })),
-            );
+          await tx.insert(experienceVariants).values(
+            variants.map((variant, index) => ({
+              experienceId: created.id,
+              ...variant,
+              sortOrder: index,
+            })),
+          );
           return created.id;
         });
         return reply.code(201).send({ experience: await getDetail(app, id) });
@@ -244,15 +261,13 @@ export const experienceRoutes: FastifyPluginAsync = async (app) => {
           await tx
             .delete(experienceVariants)
             .where(eq(experienceVariants.experienceId, updated.id));
-          await tx
-            .insert(experienceVariants)
-            .values(
-              variants.map((variant, index) => ({
-                experienceId: updated.id,
-                ...variant,
-                sortOrder: index,
-              })),
-            );
+          await tx.insert(experienceVariants).values(
+            variants.map((variant, index) => ({
+              experienceId: updated.id,
+              ...variant,
+              sortOrder: index,
+            })),
+          );
           return true;
         });
         if (!changed) return reply.code(404).send(errorBody("NOT_FOUND", "Experience not found"));

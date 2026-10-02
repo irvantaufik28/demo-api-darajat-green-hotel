@@ -1,6 +1,6 @@
 import { uuidSchema } from "../master/master.shared.js";
 
-export type CampaignSource = "website" | "phone" | "walk_in" | "ota";
+export type CampaignChannel = "website" | "front_desk";
 export type BlackoutDateInput = { dateFrom: string; dateTo: string; label?: string | null };
 
 export type CampaignBody = {
@@ -18,7 +18,7 @@ export type CampaignBody = {
   priority: number;
   cancellationPolicyId?: string | null;
   isActive: boolean;
-  sources: CampaignSource[];
+  channel: CampaignChannel;
   roomTypeIds: string[];
   weekdays: number[];
   blackoutDates: BlackoutDateInput[];
@@ -45,7 +45,7 @@ export const campaignBodySchema = {
     "minRooms",
     "priority",
     "isActive",
-    "sources",
+    "channel",
     "roomTypeIds",
     "weekdays",
     "blackoutDates",
@@ -67,12 +67,7 @@ export const campaignBodySchema = {
     priority: { type: "integer", minimum: 1, maximum: 10000 },
     cancellationPolicyId: { anyOf: [uuidSchema, { type: "null" }] },
     isActive: { type: "boolean" },
-    sources: {
-      type: "array",
-      minItems: 1,
-      uniqueItems: true,
-      items: { type: "string", enum: ["website", "phone", "walk_in", "ota"] },
-    },
+    channel: { type: "string", enum: ["website", "front_desk"] },
     roomTypeIds: { type: "array", uniqueItems: true, items: uuidSchema },
     weekdays: {
       type: "array",
