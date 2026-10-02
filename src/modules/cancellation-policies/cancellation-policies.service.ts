@@ -17,7 +17,6 @@ function validDate(value: string): boolean {
 }
 
 export async function validateCancellationPolicy(db: Database, body: CancellationPolicyBody) {
-  if (!body.name.trim()) throw new CancellationPolicyInputError("Policy name is required");
   if (!body.appliesWebsite && !body.appliesPhone) {
     throw new CancellationPolicyInputError("Select Website, Phone, or both");
   }
@@ -54,20 +53,18 @@ export async function validateCancellationPolicy(db: Database, body: Cancellatio
   if (new Set(body.roomTypeIds).size !== body.roomTypeIds.length) {
     throw new CancellationPolicyInputError("Room types must be unique");
   }
-  if (body.policyTypeId) {
-    const [policyType] = await db
-      .select({ id: masterItems.id })
-      .from(masterItems)
-      .where(
-        and(
-          eq(masterItems.id, body.policyTypeId),
-          eq(masterItems.category, "cancellation_policy_types"),
-          eq(masterItems.isActive, true),
-        ),
-      )
-      .limit(1);
-    if (!policyType) throw new CancellationPolicyInputError("Policy type not found or inactive");
-  }
+  const [policyType] = await db
+    .select({ name: masterItems.name })
+    .from(masterItems)
+    .where(
+      and(
+        eq(masterItems.id, body.policyTypeId),
+        eq(masterItems.category, "cancellation_policy_types"),
+        eq(masterItems.isActive, true),
+      ),
+    )
+    .limit(1);
+  if (!policyType) throw new CancellationPolicyInputError("Policy type not found or inactive");
   if (body.roomTypeIds.length) {
     const found = await db
       .select({ id: roomTypes.id })
@@ -77,12 +74,13 @@ export async function validateCancellationPolicy(db: Database, body: Cancellatio
       throw new CancellationPolicyInputError("One or more room types were not found");
     }
   }
+  return policyType.name;
 }
 
-export function cancellationPolicyValues(body: CancellationPolicyBody) {
+export function cancellationPolicyValues(body: CancellationPolicyBody, policyTypeName: string) {
   return {
-    name: body.name.trim(),
-    policyTypeId: body.policyTypeId ?? null,
+    name: policyTypeName,
+    policyTypeId: body.policyTypeId,
     appliesWebsite: body.appliesWebsite,
     appliesPhone: body.appliesPhone,
     stayStart: body.stayStart ?? null,

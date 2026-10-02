@@ -9,8 +9,7 @@ export type CancellationRuleInput = {
 };
 
 export type CancellationPolicyBody = {
-  name: string;
-  policyTypeId?: string | null;
+  policyTypeId: string;
   appliesWebsite: boolean;
   appliesPhone: boolean;
   stayStart?: string | null;
@@ -35,7 +34,7 @@ export const cancellationPolicyBodySchema = {
   type: "object",
   additionalProperties: false,
   required: [
-    "name",
+    "policyTypeId",
     "appliesWebsite",
     "appliesPhone",
     "noShowChargeValue",
@@ -44,8 +43,7 @@ export const cancellationPolicyBodySchema = {
     "rules",
   ],
   properties: {
-    name: { type: "string", minLength: 1, maxLength: 160 },
-    policyTypeId: { anyOf: [uuidSchema, { type: "null" }] },
+    policyTypeId: uuidSchema,
     appliesWebsite: { type: "boolean" },
     appliesPhone: { type: "boolean" },
     stayStart: nullableDateSchema,

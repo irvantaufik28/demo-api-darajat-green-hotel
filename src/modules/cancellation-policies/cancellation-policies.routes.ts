@@ -94,11 +94,11 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       try {
-        await validateCancellationPolicy(app.db, request.body);
+        const policyTypeName = await validateCancellationPolicy(app.db, request.body);
         const id = await app.db.transaction(async (tx) => {
           const [created] = await tx
             .insert(cancellationPolicies)
-            .values(cancellationPolicyValues(request.body))
+            .values(cancellationPolicyValues(request.body, policyTypeName))
             .returning({ id: cancellationPolicies.id });
           await replaceCancellationPolicyRelations(tx, created.id, request.body);
           return created.id;
@@ -124,11 +124,11 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       try {
-        await validateCancellationPolicy(app.db, request.body);
+        const policyTypeName = await validateCancellationPolicy(app.db, request.body);
         const changed = await app.db.transaction(async (tx) => {
           const [updated] = await tx
             .update(cancellationPolicies)
-            .set({ ...cancellationPolicyValues(request.body), updatedAt: new Date() })
+            .set({ ...cancellationPolicyValues(request.body, policyTypeName), updatedAt: new Date() })
             .where(eq(cancellationPolicies.id, request.params.id))
             .returning({ id: cancellationPolicies.id });
           if (!updated) return false;
