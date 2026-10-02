@@ -9,6 +9,7 @@ export * from "./cancellation_policies.schema.js";
 export * from "./cancellation_policy_room_types.schema.js";
 export * from "./cancellation_rules.schema.js";
 export * from "./experiences.schema.js";
+export * from "./experience_variants.schema.js";
 export * from "./guests.schema.js";
 export * from "./master_items.schema.js";
 export * from "./payment_refunds.schema.js";
