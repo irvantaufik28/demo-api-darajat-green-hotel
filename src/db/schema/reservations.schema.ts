@@ -5,7 +5,6 @@ import {
   index,
   integer,
   jsonb,
-  pgTable,
   smallint,
   text,
   timestamp,
@@ -19,7 +18,9 @@ import { guests } from "./guests.schema.js";
 import { masterItems } from "./master_items.schema.js";
 import { users } from "./users.schema.js";
 
-export const reservations = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const reservations = appSchema.table(
   "reservations",
   {
     id: idColumn(),

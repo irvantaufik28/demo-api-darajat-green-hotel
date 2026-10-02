@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
-import { check, pgTable, primaryKey, smallint, uuid } from "drizzle-orm/pg-core";
+import { check, primaryKey, smallint, uuid } from "drizzle-orm/pg-core";
 import { campaigns } from "./campaigns.schema.js";
 
-export const campaignDays = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const campaignDays = appSchema.table(
   "campaign_days",
   {
     campaignId: uuid("campaign_id")

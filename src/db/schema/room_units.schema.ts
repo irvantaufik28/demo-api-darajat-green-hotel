@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, index, pgTable, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, index, uuid, varchar } from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn } from "./columns.js";
 import { masterItems } from "./master_items.schema.js";
 import { roomTypes } from "./room_types.schema.js";
 
-export const roomUnits = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const roomUnits = appSchema.table(
   "room_units",
   {
     id: idColumn(),

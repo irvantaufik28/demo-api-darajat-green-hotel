@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { check, index, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { idColumn, rupiah } from "./columns.js";
 import { payments } from "./payments.schema.js";
 import { users } from "./users.schema.js";
 
-export const paymentRefunds = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const paymentRefunds = appSchema.table(
   "payment_refunds",
   {
     id: idColumn(),

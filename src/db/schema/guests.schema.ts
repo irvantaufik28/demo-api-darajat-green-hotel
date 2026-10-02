@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
-import { check, pgTable, text, varchar } from "drizzle-orm/pg-core";
+import { check, text, varchar } from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn } from "./columns.js";
 
-export const guests = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const guests = appSchema.table(
   "guests",
   {
     id: idColumn(),

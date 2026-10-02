@@ -1,8 +1,10 @@
-import { pgTable, primaryKey, uuid } from "drizzle-orm/pg-core";
+import { primaryKey, uuid } from "drizzle-orm/pg-core";
 import { masterItems } from "./master_items.schema.js";
 import { roomTypes } from "./room_types.schema.js";
 
-export const roomTypeAmenities = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const roomTypeAmenities = appSchema.table(
   "room_type_amenities",
   {
     roomTypeId: uuid("room_type_id")

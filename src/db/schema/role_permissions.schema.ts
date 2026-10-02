@@ -1,8 +1,10 @@
-import { pgTable, primaryKey, uuid } from "drizzle-orm/pg-core";
+import { primaryKey, uuid } from "drizzle-orm/pg-core";
 import { permissions } from "./permissions.schema.js";
 import { roles } from "./roles.schema.js";
 
-export const rolePermissions = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const rolePermissions = appSchema.table(
   "role_permissions",
   {
     roleId: uuid("role_id")

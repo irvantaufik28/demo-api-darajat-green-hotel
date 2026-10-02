@@ -1,7 +1,9 @@
-import { boolean, index, integer, pgTable, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn } from "./columns.js";
 
-export const masterItems = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const masterItems = appSchema.table(
   "master_items",
   {
     id: idColumn(),

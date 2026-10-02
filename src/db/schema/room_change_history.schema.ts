@@ -1,11 +1,13 @@
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { idColumn, rupiah } from "./columns.js";
 import { reservationRooms } from "./reservation_rooms.schema.js";
 import { roomTypes } from "./room_types.schema.js";
 import { roomUnits } from "./room_units.schema.js";
 import { users } from "./users.schema.js";
 
-export const roomChangeHistory = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const roomChangeHistory = appSchema.table(
   "room_change_history",
   {
     id: idColumn(),

@@ -1,9 +1,11 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, pgTable, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, date, uuid, varchar } from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn, rupiah } from "./columns.js";
 import { masterItems } from "./master_items.schema.js";
 
-export const cancellationPolicies = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const cancellationPolicies = appSchema.table(
   "cancellation_policies",
   {
     id: idColumn(),

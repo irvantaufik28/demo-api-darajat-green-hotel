@@ -1,8 +1,10 @@
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { idColumn } from "./columns.js";
 import { users } from "./users.schema.js";
 
-export const userSessions = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const userSessions = appSchema.table(
   "user_sessions",
   {
     id: idColumn(),

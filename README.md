@@ -20,7 +20,7 @@ The server listens at `http://127.0.0.1:4000` by default. Check `GET /api/v1/hea
 ## Deploy to Vercel
 
 1. Import this repository into Vercel. If it is inside a monorepo, set the project Root Directory to `greenhero-api`. Vercel detects the Fastify entry point at `src/server.ts`; leave Framework Preset, Build Command, and Output Directory at their automatic settings. Node.js 24 is pinned in `package.json`.
-2. Configure `DATABASE_URL` (a PostgreSQL server reachable from Vercel), `JWT_SECRET` (at least 32 random characters), and `CORS_ORIGINS` (the exact HTTPS origin of the admin frontend; separate multiple origins with commas) in Vercel Environment Variables. Do not copy the local `localhost` database URL or `.env` to Vercel.
+2. Configure `DATABASE_URL` (a PostgreSQL server reachable from Vercel), `JWT_SECRET` (at least 32 random characters), and `CORS_ORIGINS` (the exact HTTPS origin of the admin frontend; separate multiple origins with commas) in Vercel Environment Variables. Use a different `DATABASE_URL` for staging and production. Do not copy the local `localhost` database URL or `.env` to Vercel.
 3. Apply database migrations to that database separately with `npm run db:migrate`, then seed an initial account if needed with `npm run db:seed` and `SEED_USER_PASSWORD`. Neither command runs during a Vercel build.
 4. Deploy and check `GET /api/v1/health` on the deployed URL. Set the admin frontend API base URL to the deployed origin. Place the API and admin on custom subdomains of the same site when using browser refresh cookies.
 
@@ -56,9 +56,9 @@ Admin route handlers can use `preHandler: app.authenticate` or `preHandler: app.
 
 ## Database schema
 
-Each table has its own file under `src/db/schema/`, named `<table_name>.schema.ts`. `columns.ts` holds shared column builders, and `index.ts` exports the 34 tables for Drizzle. The schema follows the supplied PostgreSQL database design, including foreign keys, status checks, and partial unique indexes.
+Each table has its own file under `src/db/schema/`, named `<table_name>.schema.ts`. `columns.ts` holds shared column builders, and `index.ts` exports the 34 tables for Drizzle. `app-schema.ts` fixes the PostgreSQL application schema as `greenhero`. Staging and production use the same schema name in separate databases selected by `DATABASE_URL`, keeping one migration history valid in both environments. The schema follows the supplied PostgreSQL database design, including foreign keys, status checks, and partial unique indexes.
 
-`drizzle.config.ts` reads `DATABASE_URL` from `.env`. Generated SQL and Drizzle snapshots live in `drizzle/`. The initial migration is `drizzle/0000_serious_warlock.sql`. Review migrations before running `npm run db:migrate`, because that command changes the configured database. The initial migration has been generated but is not applied automatically.
+`drizzle.config.ts` reads `DATABASE_URL` from `.env`. Generated SQL and Drizzle snapshots live in `drizzle/`. Migration `0000_serious_warlock.sql` creates the original tables; `0001_far_sugar_man.sql` moves all 34 tables from `public` into `greenhero` without recreating them. On a fresh database, run both in order with `npm run db:migrate`. Drizzle keeps its migration journal separately in the `drizzle` schema. Review migrations before applying them to staging or production.
 
 ## Seed admin access
 

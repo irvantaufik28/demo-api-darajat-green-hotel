@@ -1,7 +1,9 @@
-import { pgTable, varchar } from "drizzle-orm/pg-core";
+import { varchar } from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn } from "./columns.js";
 
-export const permissions = pgTable("permissions", {
+import { appSchema } from "./app-schema.js";
+
+export const permissions = appSchema.table("permissions", {
   id: idColumn(),
   code: varchar("code", { length: 120 }).notNull().unique(),
   module: varchar("module", { length: 80 }).notNull(),

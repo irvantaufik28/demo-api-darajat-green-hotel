@@ -3,7 +3,6 @@ import {
   check,
   index,
   integer,
-  pgTable,
   text,
   timestamp,
   uniqueIndex,
@@ -15,7 +14,9 @@ import { masterItems } from "./master_items.schema.js";
 import { reservations } from "./reservations.schema.js";
 import { users } from "./users.schema.js";
 
-export const payments = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const payments = appSchema.table(
   "payments",
   {
     id: idColumn(),

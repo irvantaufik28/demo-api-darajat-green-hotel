@@ -1,8 +1,10 @@
-import { pgTable, primaryKey, uuid } from "drizzle-orm/pg-core";
+import { primaryKey, uuid } from "drizzle-orm/pg-core";
 import { cancellationPolicies } from "./cancellation_policies.schema.js";
 import { roomTypes } from "./room_types.schema.js";
 
-export const cancellationPolicyRoomTypes = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const cancellationPolicyRoomTypes = appSchema.table(
   "cancellation_policy_room_types",
   {
     policyId: uuid("policy_id")

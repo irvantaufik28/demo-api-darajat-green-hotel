@@ -5,7 +5,6 @@ import {
   date,
   index,
   integer,
-  pgTable,
   smallint,
   uniqueIndex,
   uuid,
@@ -13,7 +12,9 @@ import {
 import { auditTimestamps, idColumn, rupiah } from "./columns.js";
 import { roomTypes } from "./room_types.schema.js";
 
-export const roomInventoryDaily = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const roomInventoryDaily = appSchema.table(
   "room_inventory_daily",
   {
     id: idColumn(),

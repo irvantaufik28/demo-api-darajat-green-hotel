@@ -1,8 +1,10 @@
-import { jsonb, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { jsonb, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { idColumn } from "./columns.js";
 import { payments } from "./payments.schema.js";
 
-export const paymentWebhookEvents = pgTable(
+import { appSchema } from "./app-schema.js";
+
+export const paymentWebhookEvents = appSchema.table(
   "payment_webhook_events",
   {
     id: idColumn(),
