@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Green Hero API",
-    "description": "Current Green Hero API endpoints. Select the Local environment, set the password, then run Login. Postman stores the refresh cookie automatically for Refresh and Logout.",
+    "description": "Green Hero admin API examples. Select the Local environment, set the password, and run Login. Run Master List requests to capture seeded IDs, then Room Types, Room Numbers, Cancellation Policies, and Campaigns. Create requests update the corresponding ID variables. Postman stores the refresh cookie automatically.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -10,7 +10,10 @@
       "request": {
         "method": "GET",
         "url": "{{baseUrl}}/api/v1/health",
-        "description": "Check API process health."
+        "description": "Check API process health.",
+        "auth": {
+          "type": "noauth"
+        }
       }
     },
     {
@@ -33,10 +36,15 @@
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -65,7 +73,9 @@
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "url": "{{baseUrl}}/api/v1/admin/auth/refresh",
             "description": "Uses the HttpOnly gh_refresh cookie saved in Postman's cookie jar and rotates it."
@@ -77,7 +87,11 @@
             "auth": {
               "type": "bearer",
               "bearer": [
-                { "key": "token", "value": "{{accessToken}}", "type": "string" }
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
               ]
             },
             "method": "GET",
@@ -101,13 +115,1447 @@
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "url": "{{baseUrl}}/api/v1/admin/auth/logout",
             "description": "Revokes the refresh session and clears the refresh cookie."
           }
         }
       ]
+    },
+    {
+      "name": "Master",
+      "item": [
+        {
+          "name": "Amenities - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/amenities"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('amenityId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Amenities - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/amenities",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"WiFi Premium\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('amenityId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Amenities - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/amenities/{{amenityId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"WiFi Premium Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Amenities - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/amenities/{{amenityId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Bed Types - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/bed-types"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('bedTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bed Types - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/bed-types",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Super King Bed\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('bedTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bed Types - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/bed-types/{{bedTypeId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Super King Bed Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Bed Types - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/bed-types/{{bedTypeId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Meal Types - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/meal-types"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('mealTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Meal Types - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/meal-types",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Half Board\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('mealTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Meal Types - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/meal-types/{{mealTypeId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Half Board Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Meal Types - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/meal-types/{{mealTypeId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Room View Types - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/room-view-types"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('viewTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Room View Types - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/room-view-types",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Valley View\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('viewTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Room View Types - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/room-view-types/{{viewTypeId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Valley View Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Room View Types - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/room-view-types/{{viewTypeId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Floor - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/floor"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('floorId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Floor - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/floor",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"3rd Floor\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('floorId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Floor - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/floor/{{floorId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"3rd Floor Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Floor - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/floor/{{floorId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Experience Categories - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/experience-categories"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('experienceCategoryId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Experience Categories - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/experience-categories",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Wellness\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('experienceCategoryId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Experience Categories - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/experience-categories/{{experienceCategoryId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Wellness Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Experience Categories - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/experience-categories/{{experienceCategoryId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "OTA Channels - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/ota-channels"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('otaChannelId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "OTA Channels - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/ota-channels",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Expedia\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('otaChannelId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "OTA Channels - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/ota-channels/{{otaChannelId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Expedia Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "OTA Channels - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/ota-channels/{{otaChannelId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Payment Methods - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/payment-methods"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('paymentMethodId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payment Methods - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/payment-methods",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Debit Card\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('paymentMethodId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payment Methods - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/payment-methods/{{paymentMethodId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Debit Card Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Payment Methods - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/payment-methods/{{paymentMethodId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Cancellation Policy Types - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/cancellation-policy-types"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('policyTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancellation Policy Types - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/cancellation-policy-types",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Moderate\",\n  \"sortOrder\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('policyTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancellation Policy Types - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/cancellation-policy-types/{{policyTypeId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Moderate Updated\",\n  \"sortOrder\": 11,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancellation Policy Types - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/cancellation-policy-types/{{policyTypeId}}",
+            "description": "Deletes the selected item. Returns 409 when the item is referenced."
+          }
+        },
+        {
+          "name": "Capacity Patterns - List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/master/capacity-patterns"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('capacityPatternId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capacity Patterns - Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/master/capacity-patterns",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adults\": 4,\n  \"children\": 2,\n  \"sortOrder\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.item?.id;",
+                  "  if (id) pm.environment.set('capacityPatternId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capacity Patterns - Update",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/master/capacity-patterns/{{capacityPatternId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sortOrder\": 21,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Capacity Patterns - Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/master/capacity-patterns/{{capacityPatternId}}",
+            "description": "Returns 409 if this pattern is used by a Room Type."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Room Types",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/room-types?page=1&limit=20&search=Premium"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('roomTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/room-types/{{roomTypeId}}"
+          }
+        },
+        {
+          "name": "Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/room-types",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"PREMIUM_DELUXE\",\n  \"slug\": \"premium-deluxe\",\n  \"name\": \"Premium Deluxe\",\n  \"description\": \"Kamar dengan pemandangan lembah.\",\n  \"sizeSqm\": \"32.00\",\n  \"bedTypeId\": \"{{bedTypeId}}\",\n  \"mealTypeId\": \"{{mealTypeId}}\",\n  \"viewTypeId\": \"{{viewTypeId}}\",\n  \"bedCount\": 1,\n  \"extraBedEnabled\": true,\n  \"maxExtraBeds\": 1,\n  \"extraBedPricePerNight\": 200000,\n  \"adultBreakfastPrice\": 75000,\n  \"childBreakfastPrice\": 50000,\n  \"basePricePerNight\": 1500000,\n  \"amenityIds\": [\n    \"{{amenityId}}\"\n  ],\n  \"capacityPatterns\": [\n    {\n      \"capacityPatternId\": \"{{capacityPatternId}}\",\n      \"extraBeds\": 0\n    }\n  ],\n  \"images\": [\n    {\n      \"url\": \"https://example.com/premium-deluxe.jpg\",\n      \"altText\": \"Premium Deluxe\",\n      \"isCover\": true,\n      \"sortOrder\": 0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.roomType?.id;",
+                  "  if (id) pm.environment.set('roomTypeId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/room-types/{{roomTypeId}}",
+            "description": "PUT replaces amenities, capacity patterns, and images with the provided arrays.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"PREMIUM_DELUXE\",\n  \"slug\": \"premium-deluxe\",\n  \"name\": \"Premium Deluxe\",\n  \"description\": \"Kamar dengan pemandangan lembah.\",\n  \"sizeSqm\": \"32.00\",\n  \"bedTypeId\": \"{{bedTypeId}}\",\n  \"mealTypeId\": \"{{mealTypeId}}\",\n  \"viewTypeId\": \"{{viewTypeId}}\",\n  \"bedCount\": 1,\n  \"extraBedEnabled\": true,\n  \"maxExtraBeds\": 1,\n  \"extraBedPricePerNight\": 200000,\n  \"adultBreakfastPrice\": 75000,\n  \"childBreakfastPrice\": 50000,\n  \"basePricePerNight\": 1500000,\n  \"amenityIds\": [\n    \"{{amenityId}}\"\n  ],\n  \"capacityPatterns\": [\n    {\n      \"capacityPatternId\": \"{{capacityPatternId}}\",\n      \"extraBeds\": 0\n    }\n  ],\n  \"images\": [\n    {\n      \"url\": \"https://example.com/premium-deluxe.jpg\",\n      \"altText\": \"Premium Deluxe\",\n      \"isCover\": true,\n      \"sortOrder\": 0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set Active Status",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/room-types/{{roomTypeId}}/status",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Run Master lists first to populate the referenced IDs."
+    },
+    {
+      "name": "Room Numbers",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/room-numbers?page=1&limit=20&roomTypeId={{roomTypeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('roomNumberId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/room-numbers/{{roomNumberId}}"
+          }
+        },
+        {
+          "name": "Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/room-numbers",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomNumber\": \"401\",\n  \"roomTypeId\": \"{{roomTypeId}}\",\n  \"floorId\": \"{{floorId}}\",\n  \"bedConfiguration\": \"King Bed\",\n  \"operationalStatus\": \"available\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.roomNumber?.id;",
+                  "  if (id) pm.environment.set('roomNumberId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/room-numbers/{{roomNumberId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomNumber\": \"401\",\n  \"roomTypeId\": \"{{roomTypeId}}\",\n  \"floorId\": \"{{floorId}}\",\n  \"bedConfiguration\": \"King Bed\",\n  \"operationalStatus\": \"available\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Change Operational Status",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/room-numbers/{{roomNumberId}}/operational-status",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operationalStatus\": \"maintenance\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/admin/room-numbers/{{roomNumberId}}",
+            "description": "Returns 409 if this room is used by a reservation or room-change history."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Prices & Stock",
+      "item": [
+        {
+          "name": "List Daily Inventory",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/prices-stocks?roomTypeId={{roomTypeId}}&startDate=2026-10-01&endDate=2026-10-31&page=1&limit=30"
+          }
+        },
+        {
+          "name": "Bulk Create or Update",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/prices-stocks/bulk",
+            "description": "For an existing date, replace expectedVersion: null with the integer version returned by List Daily Inventory. Max 300 changes, all saved atomically.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomTypeId\": \"{{roomTypeId}}\",\n  \"changes\": [\n    {\n      \"stayDate\": \"2026-10-02\",\n      \"expectedVersion\": null,\n      \"basePrice\": 1750000,\n      \"sellableStock\": 1\n    },\n    {\n      \"stayDate\": \"2026-10-03\",\n      \"expectedVersion\": null,\n      \"minNights\": 2,\n      \"stopSell\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancellation Policies",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/cancellation-policies?page=1&limit=20&source=website"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('cancellationPolicyId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/cancellation-policies/{{cancellationPolicyId}}"
+          }
+        },
+        {
+          "name": "Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/cancellation-policies",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Flexible Cancellation 48 Hours\",\n  \"policyTypeId\": \"{{policyTypeId}}\",\n  \"appliesWebsite\": true,\n  \"appliesPhone\": true,\n  \"stayStart\": null,\n  \"stayEnd\": null,\n  \"noShowChargeType\": \"percentage\",\n  \"noShowChargeValue\": 100,\n  \"isActive\": true,\n  \"roomTypeIds\": [\n    \"{{roomTypeId}}\"\n  ],\n  \"rules\": [\n    {\n      \"timingType\": \"more_than\",\n      \"daysBefore\": 2,\n      \"chargeType\": \"percentage\",\n      \"chargeValue\": 0,\n      \"sortOrder\": 0\n    },\n    {\n      \"timingType\": \"within\",\n      \"daysBefore\": 2,\n      \"chargeType\": \"percentage\",\n      \"chargeValue\": 100,\n      \"sortOrder\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.policy?.id;",
+                  "  if (id) pm.environment.set('cancellationPolicyId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/cancellation-policies/{{cancellationPolicyId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Flexible Cancellation 48 Hours\",\n  \"policyTypeId\": \"{{policyTypeId}}\",\n  \"appliesWebsite\": true,\n  \"appliesPhone\": true,\n  \"stayStart\": null,\n  \"stayEnd\": null,\n  \"noShowChargeType\": \"percentage\",\n  \"noShowChargeValue\": 100,\n  \"isActive\": true,\n  \"roomTypeIds\": [\n    \"{{roomTypeId}}\"\n  ],\n  \"rules\": [\n    {\n      \"timingType\": \"more_than\",\n      \"daysBefore\": 2,\n      \"chargeType\": \"percentage\",\n      \"chargeValue\": 0,\n      \"sortOrder\": 0\n    },\n    {\n      \"timingType\": \"within\",\n      \"daysBefore\": 2,\n      \"chargeType\": \"percentage\",\n      \"chargeValue\": 100,\n      \"sortOrder\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set Active Status",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/cancellation-policies/{{cancellationPolicyId}}/status",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Campaigns",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns?page=1&limit=20&source=website&roomTypeId={{roomTypeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = (body.items || [])[0]?.id;",
+                  "  if (id) pm.environment.set('campaignId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}"
+          }
+        },
+        {
+          "name": "Create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Weekend Escape\",\n  \"promoCode\": \"WEEKEND15\",\n  \"requiresCode\": true,\n  \"bookingStart\": \"2026-10-01\",\n  \"bookingEnd\": \"2026-12-31\",\n  \"stayStart\": \"2026-10-01\",\n  \"stayEnd\": \"2026-12-31\",\n  \"discountType\": \"percent\",\n  \"discountValue\": 15,\n  \"minNights\": 2,\n  \"minRooms\": 1,\n  \"priority\": 1,\n  \"cancellationPolicyId\": \"{{cancellationPolicyId}}\",\n  \"isActive\": true,\n  \"sources\": [\n    \"website\",\n    \"phone\"\n  ],\n  \"roomTypeIds\": [\n    \"{{roomTypeId}}\"\n  ],\n  \"weekdays\": [\n    5,\n    6,\n    7\n  ],\n  \"blackoutDates\": [\n    {\n      \"dateFrom\": \"2026-12-24\",\n      \"dateTo\": \"2026-12-26\",\n      \"label\": \"Holiday peak\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const id = body.campaign?.id;",
+                  "  if (id) pm.environment.set('campaignId', id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Weekend Escape\",\n  \"promoCode\": \"WEEKEND15\",\n  \"requiresCode\": true,\n  \"bookingStart\": \"2026-10-01\",\n  \"bookingEnd\": \"2026-12-31\",\n  \"stayStart\": \"2026-10-01\",\n  \"stayEnd\": \"2026-12-31\",\n  \"discountType\": \"percent\",\n  \"discountValue\": 15,\n  \"minNights\": 2,\n  \"minRooms\": 1,\n  \"priority\": 1,\n  \"cancellationPolicyId\": \"{{cancellationPolicyId}}\",\n  \"isActive\": true,\n  \"sources\": [\n    \"website\",\n    \"phone\"\n  ],\n  \"roomTypeIds\": [\n    \"{{roomTypeId}}\"\n  ],\n  \"weekdays\": [\n    5,\n    6,\n    7\n  ],\n  \"blackoutDates\": [\n    {\n      \"dateFrom\": \"2026-12-24\",\n      \"dateTo\": \"2026-12-26\",\n      \"label\": \"Holiday peak\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set Priority",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}/priority",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set Active Status",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/admin/campaigns/{{campaignId}}/status",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  }
 }

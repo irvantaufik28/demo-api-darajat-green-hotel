@@ -15,6 +15,20 @@
       "when": 1790940482899,
       "tag": "0001_far_sugar_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790943637570,
+      "tag": "0002_minor_romulus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790945599082,
+      "tag": "0003_old_professor_monster",
+      "breakpoints": true
     }
   ]
 }

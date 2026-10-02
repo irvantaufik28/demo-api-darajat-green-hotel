@@ -25,6 +25,17 @@ type PermissionSeed = {
 
 const permissionSeeds: PermissionSeed[] = [
   { code: "dashboard.view", module: "Dashboard", label: "View Dashboard", allowed: all },
+  { code: "master.view", module: "Master", label: "View Master Data", allowed: all },
+  ...[
+    ["create", "Create Master Data"],
+    ["edit", "Edit Master Data"],
+    ["delete", "Delete Master Data"],
+  ].map(([code, label]) => ({
+    code: `master.${code}`,
+    module: "Master",
+    label,
+    allowed: ownerAdmin,
+  })),
   { code: "reservations.view", module: "Reservations", label: "View Reservations", allowed: all },
   ...[
     ["create", "Create Reservation"],

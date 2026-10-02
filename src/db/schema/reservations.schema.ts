@@ -17,6 +17,7 @@ import { cancellationPolicies } from "./cancellation_policies.schema.js";
 import { guests } from "./guests.schema.js";
 import { masterItems } from "./master_items.schema.js";
 import { users } from "./users.schema.js";
+import { reservationPaymentStatusEnum, reservationStatusEnum } from "./status.enums.js";
 
 import { appSchema } from "./app-schema.js";
 
@@ -35,9 +36,8 @@ export const reservations = appSchema.table(
     checkOutDate: date("check_out_date").notNull(),
     adults: smallint("adults").notNull().default(0),
     children: smallint("children").notNull().default(0),
-    reservationStatus: varchar("reservation_status", { length: 25 }).notNull().default("pending"),
-    paymentStatus: varchar("payment_status", { length: 20 }).notNull().default("unpaid"),
-    operationalStatus: varchar("operational_status", { length: 30 }),
+    reservationStatus: reservationStatusEnum("reservation_status").notNull().default("pending"),
+    paymentStatus: reservationPaymentStatusEnum("payment_status").notNull().default("unpaid"),
     specialRequests: text("special_requests"),
     internalNotes: text("internal_notes"),
     cancellationPolicyId: uuid("cancellation_policy_id").references(() => cancellationPolicies.id),
@@ -58,7 +58,7 @@ export const reservations = appSchema.table(
   (table) => [
     index("reservations_check_in_status_idx").on(table.checkInDate, table.reservationStatus),
     index("reservations_check_out_status_idx").on(table.checkOutDate, table.reservationStatus),
-    index("reservations_operational_payment_idx").on(table.operationalStatus, table.paymentStatus),
+    index("reservations_payment_status_idx").on(table.paymentStatus),
     index("reservations_guest_created_idx").on(table.guestId, table.createdAt),
     index("reservations_source_created_idx").on(table.source, table.createdAt),
     uniqueIndex("reservations_ota_reference_uq")
@@ -75,18 +75,6 @@ export const reservations = appSchema.table(
     check(
       "reservations_ota_channel_check",
       sql`${table.source} <> 'ota' or ${table.otaChannelId} is not null`,
-    ),
-    check(
-      "reservations_status_check",
-      sql`${table.reservationStatus} in ('pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'expired')`,
-    ),
-    check(
-      "reservations_payment_status_check",
-      sql`${table.paymentStatus} in ('unpaid', 'partial', 'paid', 'failed', 'refunded', 'expired')`,
-    ),
-    check(
-      "reservations_operational_status_check",
-      sql`${table.operationalStatus} is null or ${table.operationalStatus} in ('awaiting_confirmation', 'upcoming', 'ready_to_check_in', 'checked_in', 'in_house', 'due_out', 'overdue', 'checked_out', 'cancelled', 'expired')`,
     ),
   ],
 );
