@@ -68,8 +68,7 @@ Run migrations first. Set a temporary `SEED_USER_PASSWORD` of at least 5 charact
 
 ```text
 src/
-  create-app.ts             Fastify instance and application plugins
-  server.ts                 Process startup and graceful shutdown
+  server.ts                 Fastify entry point, startup, and graceful shutdown
   routes/
     index.ts                Versioned route registration
     public/
