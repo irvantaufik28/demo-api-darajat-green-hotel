@@ -11,6 +11,22 @@ export type InventoryChange = {
 
 export type BulkInventoryBody = { roomTypeId: string; changes: InventoryChange[] };
 
+export type InventoryFields = {
+  basePrice?: number;
+  sellableStock?: number;
+  minNights?: number;
+  stopSell?: boolean;
+};
+
+export type RangeInventoryBody = {
+  roomTypeId: string;
+  startDate: string;
+  endDate: string;
+  fields: InventoryFields;
+  applicableWeekdays?: number[];
+  customDayPrices?: { weekday: number; basePrice: number }[];
+};
+
 export const stayDateSchema = {
   type: "string",
   pattern: "^\\d{4}-\\d{2}-\\d{2}$",
@@ -50,6 +66,49 @@ export const inventoryBulkBodySchema = {
           sellableStock: { type: "integer", minimum: 0, maximum: 32767 },
           minNights: { type: "integer", minimum: 1, maximum: 32767 },
           stopSell: { type: "boolean" },
+        },
+      },
+    },
+  },
+} as const;
+
+const inventoryFieldsSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    basePrice: { type: "integer", minimum: 0 },
+    sellableStock: { type: "integer", minimum: 0, maximum: 32767 },
+    minNights: { type: "integer", minimum: 1, maximum: 32767 },
+    stopSell: { type: "boolean" },
+  },
+} as const;
+
+export const inventoryRangeBodySchema = {
+  type: "object",
+  required: ["roomTypeId", "startDate", "endDate", "fields"],
+  additionalProperties: false,
+  properties: {
+    roomTypeId: uuidSchema,
+    startDate: stayDateSchema,
+    endDate: stayDateSchema,
+    fields: inventoryFieldsSchema,
+    applicableWeekdays: {
+      type: "array",
+      minItems: 1,
+      maxItems: 7,
+      uniqueItems: true,
+      items: { type: "integer", minimum: 1, maximum: 7 },
+    },
+    customDayPrices: {
+      type: "array",
+      maxItems: 7,
+      items: {
+        type: "object",
+        required: ["weekday", "basePrice"],
+        additionalProperties: false,
+        properties: {
+          weekday: { type: "integer", minimum: 1, maximum: 7 },
+          basePrice: { type: "integer", minimum: 0 },
         },
       },
     },

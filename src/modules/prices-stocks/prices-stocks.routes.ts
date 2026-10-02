@@ -6,8 +6,10 @@ import { roomUnits } from "../../db/schema/room_units.schema.js";
 import {
   inventoryBulkBodySchema,
   inventoryListQuerySchema,
+  inventoryRangeBodySchema,
   type BulkInventoryBody,
   type InventoryChange,
+  type RangeInventoryBody,
 } from "./prices-stocks.schemas.js";
 
 type ListQuery = {
@@ -21,6 +23,7 @@ type ListQuery = {
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
 
 class InventoryConflict extends Error {}
+class InventoryIncomplete extends Error {}
 
 function parseStayDate(value: string): Date | null {
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -107,10 +110,10 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
               id: null,
               roomTypeId,
               stayDate,
-              basePrice: roomType.basePricePerNight,
-              sellableStock: stockLimit,
-              minNights: 1,
-              stopSell: false,
+              basePrice: null,
+              sellableStock: null,
+              minNights: null,
+              stopSell: null,
               version: null,
               isConfigured: false,
             };
@@ -119,8 +122,168 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  app.put<{ Body: BulkInventoryBody }>(
+  app.put<{ Body: RangeInventoryBody }>(
     "/bulk",
+    {
+      preHandler: app.requirePermission("prices_stocks.view"),
+      schema: { body: inventoryRangeBodySchema },
+    },
+    async (request, reply) => {
+      const {
+        roomTypeId,
+        startDate,
+        endDate,
+        fields,
+        applicableWeekdays,
+        customDayPrices = [],
+      } = request.body;
+      const range = dateRange(startDate, endDate);
+      if (!range) {
+        return reply
+          .code(400)
+          .send(errorBody("INVALID_DATE_RANGE", "Use valid dates in a range of at most 366 days"));
+      }
+      if (Object.keys(fields).length === 0 && customDayPrices.length === 0) {
+        return reply.code(400).send(errorBody("EMPTY_CHANGE", "Select at least one field"));
+      }
+      const customWeekdays = customDayPrices.map((item) => item.weekday);
+      if (new Set(customWeekdays).size !== customWeekdays.length) {
+        return reply
+          .code(400)
+          .send(errorBody("DUPLICATE_WEEKDAY", "Custom day prices must use unique weekdays"));
+      }
+      const selectedWeekdays = new Set(applicableWeekdays ?? [1, 2, 3, 4, 5, 6, 7]);
+      if (customWeekdays.some((weekday) => !selectedWeekdays.has(weekday))) {
+        return reply
+          .code(400)
+          .send(errorBody("INVALID_WEEKDAY", "A custom price weekday must be applicable"));
+      }
+      const customPriceByDay = new Map(
+        customDayPrices.map((item) => [item.weekday, item.basePrice]),
+      );
+      const hasOtherFields =
+        fields.basePrice !== undefined ||
+        fields.sellableStock !== undefined ||
+        fields.minNights !== undefined ||
+        fields.stopSell !== undefined;
+      const dates = range
+        .map((stayDate) => {
+          const weekday = new Date(`${stayDate}T00:00:00.000Z`).getUTCDay() || 7;
+          return { stayDate, weekday };
+        })
+        .filter(
+          ({ weekday }) =>
+            selectedWeekdays.has(weekday) && (hasOtherFields || customPriceByDay.has(weekday)),
+        );
+      if (dates.length === 0) {
+        return reply
+          .code(400)
+          .send(errorBody("NO_MATCHING_DATES", "No dates match the selected weekdays"));
+      }
+
+      const permissions = new Set<string>();
+      if (fields.basePrice !== undefined || customDayPrices.length)
+        permissions.add("prices_stocks.update_price");
+      if (fields.sellableStock !== undefined) permissions.add("prices_stocks.update_stock");
+      if (fields.minNights !== undefined) permissions.add("prices_stocks.manage_minimum_night");
+      if (fields.stopSell !== undefined) permissions.add("prices_stocks.manage_stop_sell");
+      for (const permission of permissions) {
+        await app.requirePermission(permission)(request, reply);
+        if (reply.sent) return;
+      }
+
+      const { roomType, stockLimit } = await getRoomTypeAndStockLimit(app, roomTypeId);
+      if (!roomType) return reply.code(404).send(errorBody("NOT_FOUND", "Room type not found"));
+      if (!roomType.isActive)
+        return reply.code(409).send(errorBody("ROOM_TYPE_INACTIVE", "Room type is inactive"));
+      if (fields.sellableStock !== undefined && fields.sellableStock > stockLimit) {
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "STOCK_EXCEEDS_ROOMS",
+              `Sellable stock cannot exceed ${stockLimit} active rooms`,
+            ),
+          );
+      }
+
+      const withPrice = dates.filter(
+        ({ weekday }) => customPriceByDay.has(weekday) || fields.basePrice !== undefined,
+      );
+      const withoutPrice = dates.filter(
+        ({ weekday }) => !customPriceByDay.has(weekday) && fields.basePrice === undefined,
+      );
+      const now = new Date();
+      try {
+        await app.db.transaction(async (tx) => {
+          const configured = await tx
+            .select({ stayDate: roomInventoryDaily.stayDate })
+            .from(roomInventoryDaily)
+            .where(
+              and(
+                eq(roomInventoryDaily.roomTypeId, roomTypeId),
+                inArray(
+                  roomInventoryDaily.stayDate,
+                  dates.map((item) => item.stayDate),
+                ),
+              ),
+            )
+            .for("update");
+          const configuredDates = new Set(configured.map((item) => item.stayDate));
+          const incomplete = dates.find(
+            ({ stayDate, weekday }) =>
+              !configuredDates.has(stayDate) &&
+              (fields.sellableStock === undefined ||
+                (fields.basePrice === undefined && !customPriceByDay.has(weekday))),
+          );
+          if (incomplete) {
+            throw new InventoryIncomplete(
+              `New date ${incomplete.stayDate} requires both basePrice and sellableStock`,
+            );
+          }
+
+          for (const group of [withPrice, withoutPrice]) {
+            if (!group.length) continue;
+            const updates = {
+              ...(group === withPrice ? { basePrice: sql`excluded.base_price` } : {}),
+              ...(fields.sellableStock !== undefined
+                ? { sellableStock: sql`excluded.sellable_stock` }
+                : {}),
+              ...(fields.minNights !== undefined ? { minNights: sql`excluded.min_nights` } : {}),
+              ...(fields.stopSell !== undefined ? { stopSell: sql`excluded.stop_sell` } : {}),
+              version: sql`${roomInventoryDaily.version} + 1`,
+              updatedAt: now,
+            };
+            await tx
+              .insert(roomInventoryDaily)
+              .values(
+                group.map(({ stayDate, weekday }) => ({
+                  roomTypeId,
+                  stayDate,
+                  basePrice: customPriceByDay.get(weekday) ?? fields.basePrice ?? 0,
+                  sellableStock: fields.sellableStock ?? 0,
+                  minNights: fields.minNights ?? 1,
+                  stopSell: fields.stopSell ?? false,
+                })),
+              )
+              .onConflictDoUpdate({
+                target: [roomInventoryDaily.roomTypeId, roomInventoryDaily.stayDate],
+                set: updates,
+              });
+          }
+        });
+      } catch (error) {
+        if (error instanceof InventoryIncomplete) {
+          return reply.code(400).send(errorBody("INCOMPLETE_NEW_DATE", error.message));
+        }
+        throw error;
+      }
+      return { updated: dates.length, startDate, endDate };
+    },
+  );
+
+  app.put<{ Body: BulkInventoryBody }>(
+    "/bulk/rows",
     {
       preHandler: app.requirePermission("prices_stocks.view"),
       schema: { body: inventoryBulkBodySchema },
@@ -194,6 +357,14 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
           }
 
           const newRows = changes.filter((change) => change.expectedVersion === null);
+          const incomplete = newRows.find(
+            (change) => change.basePrice === undefined || change.sellableStock === undefined,
+          );
+          if (incomplete) {
+            throw new InventoryIncomplete(
+              `New date ${incomplete.stayDate} requires both basePrice and sellableStock`,
+            );
+          }
           if (newRows.length) {
             const inserted = await tx
               .insert(roomInventoryDaily)
@@ -201,8 +372,8 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
                 newRows.map((change) => ({
                   roomTypeId,
                   stayDate: change.stayDate,
-                  basePrice: change.basePrice ?? roomType.basePricePerNight,
-                  sellableStock: change.sellableStock ?? stockLimit,
+                  basePrice: change.basePrice!,
+                  sellableStock: change.sellableStock!,
                   minNights: change.minNights ?? 1,
                   stopSell: change.stopSell ?? false,
                 })),
@@ -250,6 +421,9 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
       } catch (error) {
         if (error instanceof InventoryConflict) {
           return reply.code(409).send(errorBody("VERSION_CONFLICT", error.message));
+        }
+        if (error instanceof InventoryIncomplete) {
+          return reply.code(400).send(errorBody("INCOMPLETE_NEW_DATE", error.message));
         }
         throw error;
       }

@@ -112,23 +112,29 @@ POST and PUT require `roomNumber`, `roomTypeId`, `operationalStatus`, and `isAct
 | Method | Path | Permission | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/v1/admin/prices-stocks` | `prices_stocks.view` | Daily rows for `roomTypeId`, `startDate`, and `endDate`; optional `page` and `limit` (max 30) |
-| PUT | `/api/v1/admin/prices-stocks/bulk` | Per changed field | Create or update up to 300 daily rows atomically |
+| PUT | `/api/v1/admin/prices-stocks/bulk` | Per changed field | Create or update all matching dates in a range, up to 366 days, atomically |
+| PUT | `/api/v1/admin/prices-stocks/bulk/rows` | Per changed field | Save different changes on up to 300 individual dates with version checks |
 
-GET accepts up to 366 inclusive dates and fills unconfigured dates with the Room Type base price, the count of active Room Numbers, one minimum night, and stop sell off. Such rows have `isConfigured: false` and `version: null`. The response includes `items`, `page`, `limit`, `total`, `roomType`, and `stockLimit`.
+GET accepts up to 366 inclusive dates. Unconfigured dates have `basePrice`, `sellableStock`, `minNights`, `stopSell`, `id`, and `version` set to `null`, with `isConfigured: false`. These placeholders are not saved database rows. The response includes `items`, `page`, `limit`, `total`, `roomType`, and `stockLimit`.
 
-Bulk payload example:
+Bulk range payload example:
 
 ```json
 {
   "roomTypeId": "00000000-0000-0000-0000-000000000001",
-  "changes": [
-    { "stayDate": "2026-10-02", "expectedVersion": null, "basePrice": 1500000, "sellableStock": 3 },
-    { "stayDate": "2026-10-03", "expectedVersion": 2, "stopSell": true }
+  "startDate": "2026-10-01",
+  "endDate": "2026-10-31",
+  "fields": { "basePrice": 1500000, "sellableStock": 3 },
+  "applicableWeekdays": [1, 2, 3, 4, 5, 6, 7],
+  "customDayPrices": [
+    { "weekday": 7, "basePrice": 1750000 }
   ]
 }
 ```
 
-`expectedVersion` must be `null` for an unconfigured date or match the existing row's version. Each row needs at least one changed field among `basePrice`, `sellableStock`, `minNights`, and `stopSell`; omitted fields retain their existing value. The endpoint checks `prices_stocks.update_price`, `prices_stocks.update_stock`, `prices_stocks.manage_minimum_night`, and `prices_stocks.manage_stop_sell` according to fields changed. A version conflict returns 409 and rolls back the entire batch. Stock cannot exceed the number of active Room Numbers. Campaign promotions are separate from inventory and are not stored or calculated by this endpoint.
+The server expands the inclusive date range and writes matching dates in one transaction. `fields` may contain `basePrice`, `sellableStock`, `minNights`, or `stopSell`; omitted fields retain their existing value. `applicableWeekdays` defaults to all days, and `customDayPrices` overrides the general base price for selected ISO weekdays (1 = Monday, 7 = Sunday). Range updates intentionally overwrite selected fields and increment each existing row's version. If the range includes a date without a saved row, that date must receive both a price and stock explicitly; otherwise the whole request returns 400.
+
+Use `/bulk/rows` for distinct per-date edits: provide `changes` with `stayDate`, `expectedVersion`, and at least one changed field. `expectedVersion` must be `null` for an unconfigured date or match the existing row's version. A new row must include both `basePrice` and `sellableStock`; existing rows may update only selected fields. A version conflict returns 409 and rolls back the entire batch. Both write endpoints check `prices_stocks.update_price`, `prices_stocks.update_stock`, `prices_stocks.manage_minimum_night`, and `prices_stocks.manage_stop_sell` according to fields changed. Stock cannot exceed the number of active Room Numbers. Campaign promotions are separate from inventory and are not stored or calculated by this endpoint.
 
 ## Admin Cancellation Policies API
 

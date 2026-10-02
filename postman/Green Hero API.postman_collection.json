@@ -1271,11 +1271,11 @@
           }
         },
         {
-          "name": "Bulk Create or Update",
+          "name": "Bulk Update by Date Range",
           "request": {
             "method": "PUT",
             "url": "{{baseUrl}}/api/v1/admin/prices-stocks/bulk",
-            "description": "For an existing date, replace expectedVersion: null with the integer version returned by List Daily Inventory. Max 300 changes, all saved atomically.",
+            "description": "Server generates all matching daily rows within the range (max 366 days). Omit optional fields to leave existing values unchanged. ISO weekday 1=Monday, 7=Sunday.",
             "header": [
               {
                 "key": "Content-Type",
@@ -1284,7 +1284,30 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"roomTypeId\": \"{{roomTypeId}}\",\n  \"changes\": [\n    {\n      \"stayDate\": \"2026-10-02\",\n      \"expectedVersion\": null,\n      \"basePrice\": 1750000,\n      \"sellableStock\": 1\n    },\n    {\n      \"stayDate\": \"2026-10-03\",\n      \"expectedVersion\": null,\n      \"minNights\": 2,\n      \"stopSell\": true\n    }\n  ]\n}",
+              "raw": "{\n  \"roomTypeId\": \"{{roomTypeId}}\",\n  \"startDate\": \"2026-10-01\",\n  \"endDate\": \"2026-10-31\",\n  \"fields\": {\n    \"basePrice\": 1750000,\n    \"sellableStock\": 1,\n    \"minNights\": 2,\n    \"stopSell\": false\n  },\n  \"applicableWeekdays\": [\n    1,\n    2,\n    3,\n    4,\n    5,\n    6,\n    7\n  ],\n  \"customDayPrices\": [\n    {\n      \"weekday\": 7,\n      \"basePrice\": 1900000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Edit Different Dates",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/admin/prices-stocks/bulk/rows",
+            "description": "Use for different changes per date. For existing dates replace expectedVersion: null with the integer version returned by List Daily Inventory. Max 300 changes, all saved atomically.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomTypeId\": \"{{roomTypeId}}\",\n  \"changes\": [\n    {\n      \"stayDate\": \"2026-10-02\",\n      \"expectedVersion\": null,\n      \"basePrice\": 1750000,\n      \"sellableStock\": 1\n    },\n    {\n      \"stayDate\": \"2026-10-03\",\n      \"expectedVersion\": null,\n      \"basePrice\": 1750000,\n      \"sellableStock\": 1,\n      \"minNights\": 2,\n      \"stopSell\": true\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
