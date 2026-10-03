@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { authRoutes } from "../../modules/auth/auth.routes.js";
+import { dashboardRoutes } from "../../modules/dashboard/dashboard.routes.js";
 import { masterRoutes } from "../../modules/master/master.routes.js";
 import { roomTypeRoutes } from "../../modules/rooms/room-types.routes.js";
 import { roomNumberRoutes } from "../../modules/rooms/room-numbers.routes.js";
@@ -9,10 +10,23 @@ import { campaignRoutes } from "../../modules/campaigns/campaigns.routes.js";
 import { experienceRoutes } from "../../modules/experiences/experiences.routes.js";
 import { guestRoutes } from "../../modules/guests/guests.routes.js";
 import { reservationListRoutes } from "../../modules/reservations/reservations-list.routes.js";
+import { reservationArrivalsTodayRoutes } from "../../modules/reservations/reservations-arrivals-today.routes.js";
+import { reservationDeparturesTodayRoutes } from "../../modules/reservations/reservations-departures-today.routes.js";
+import { reservationInHouseRoutes } from "../../modules/reservations/reservations-in-house.routes.js";
 import { reservationCreateRoutes } from "../../modules/reservations/reservations-create.routes.js";
+import { reservationDetailRoutes } from "../../modules/reservations/reservations-detail.routes.js";
+import { reservationHistoryRoutes } from "../../modules/reservations/reservations-history.routes.js";
+import { reservationPaymentRoutes } from "../../modules/reservations/reservations-payment.routes.js";
+import { reservationConfirmRoutes } from "../../modules/reservations/reservations-confirm.routes.js";
+import { reservationCheckInRoutes } from "../../modules/reservations/reservations-check-in.routes.js";
+import { reservationCheckOutRoutes } from "../../modules/reservations/reservations-check-out.routes.js";
+import { reservationCancelRoutes } from "../../modules/reservations/reservations-cancel.routes.js";
+import { reservationCancellationSettlementRoutes } from "../../modules/reservations/reservations-cancellation-settlement.routes.js";
+import { reservationRefundRoutes } from "../../modules/reservations/reservations-refund.routes.js";
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(authRoutes, { prefix: "/auth" });
+  await app.register(dashboardRoutes, { prefix: "/dashboard" });
   await app.register(masterRoutes, { prefix: "/master" });
   await app.register(roomTypeRoutes, { prefix: "/room-types" });
   await app.register(roomNumberRoutes, { prefix: "/room-numbers" });
@@ -22,5 +36,17 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(experienceRoutes, { prefix: "/experiences" });
   await app.register(guestRoutes, { prefix: "/guests" });
   await app.register(reservationListRoutes, { prefix: "/reservations" });
+  await app.register(reservationArrivalsTodayRoutes, { prefix: "/reservations" });
+  await app.register(reservationDeparturesTodayRoutes, { prefix: "/reservations" });
+  await app.register(reservationInHouseRoutes, { prefix: "/reservations" });
   await app.register(reservationCreateRoutes, { prefix: "/reservations" });
+  await app.register(reservationDetailRoutes, { prefix: "/reservations" });
+  await app.register(reservationHistoryRoutes, { prefix: "/reservations" });
+  await app.register(reservationPaymentRoutes, { prefix: "/reservations" });
+  await app.register(reservationConfirmRoutes, { prefix: "/reservations" });
+  await app.register(reservationCheckInRoutes, { prefix: "/reservations" });
+  await app.register(reservationCheckOutRoutes, { prefix: "/reservations" });
+  await app.register(reservationCancelRoutes, { prefix: "/reservations" });
+  await app.register(reservationCancellationSettlementRoutes, { prefix: "/reservations" });
+  await app.register(reservationRefundRoutes, { prefix: "/reservations" });
 };

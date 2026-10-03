@@ -17,6 +17,7 @@ export * from "./payments.schema.js";
 export * from "./permissions.schema.js";
 export * from "./reservation_charges.schema.js";
 export * from "./reservation_deposits.schema.js";
+export * from "./reservation_events.schema.js";
 export * from "./reservation_experiences.schema.js";
 export * from "./reservation_room_extra_beds.schema.js";
 export * from "./reservation_room_nights.schema.js";

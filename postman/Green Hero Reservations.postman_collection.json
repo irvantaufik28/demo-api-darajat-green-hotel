@@ -1,0 +1,454 @@
+{
+  "info": {
+    "name": "Green Hero Reservations",
+    "description": "Admin Reservation API only. Select Green Hero Local environment, authenticate to set accessToken, and fill required UUID variables. Run migration 0008 before using Create/History.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create",
+      "item": [
+        {
+          "name": "Search Room Availability",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/availability?checkInDate={{checkInDate}}&checkOutDate={{checkOutDate}}&adults=2&children=0&roomTypeId={{roomTypeId}}"
+          }
+        },
+        {
+          "name": "Quote Walk-in",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/quote",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"walk_in\",\n  \"checkInDate\": \"{{checkInDate}}\",\n  \"checkOutDate\": \"{{checkOutDate}}\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Quote Phone",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/quote",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"phone\",\n  \"checkInDate\": \"{{checkInDate}}\",\n  \"checkOutDate\": \"{{checkOutDate}}\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Walk-in",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"walk_in\",\n  \"guest\": {\n    \"fullName\": \"Nabila Putri\",\n    \"phone\": \"+6285711223344\",\n    \"email\": \"nabila@example.com\"\n  },\n  \"checkInDate\": \"{{checkInDate}}\",\n  \"checkOutDate\": \"{{checkOutDate}}\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"adults\": 2,\n      \"children\": 0,\n      \"roomUnitId\": \"{{roomUnitId}}\",\n      \"extraBeds\": 1\n    }\n  ],\n  \"confirm\": true,\n  \"idempotencyKey\": \"{{$guid}}\",\n  \"experiences\": [\n    {\n      \"variantId\": \"{{experienceVariantId}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payment\": {\n    \"methodId\": \"{{paymentMethodId}}\",\n    \"amount\": 300000\n  },\n  \"deposit\": {\n    \"methodId\": \"{{paymentMethodId}}\",\n    \"amount\": 200000\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Each new booking needs a unique idempotencyKey. For a retry, replace {{$guid}} with the same fixed key and resend the identical body. Fill all UUID variables and use configured stay dates."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.reservation?.id) pm.collectionVariables.set('reservationId', body.reservation?.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Phone",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"phone\",\n  \"guest\": {\n    \"fullName\": \"Nabila Putri\",\n    \"phone\": \"+6285711223344\",\n    \"email\": \"nabila@example.com\"\n  },\n  \"checkInDate\": \"{{checkInDate}}\",\n  \"checkOutDate\": \"{{checkOutDate}}\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"adults\": 2,\n      \"children\": 0,\n      \"adultBreakfasts\": 2\n    }\n  ],\n  \"confirm\": false,\n  \"idempotencyKey\": \"{{$guid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Each new booking needs a unique idempotencyKey. For a retry, replace {{$guid}} with the same fixed key and resend the identical body. Fill all UUID variables and use configured stay dates."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.reservation?.id) pm.collectionVariables.set('reservationId', body.reservation?.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create OTA",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"ota\",\n  \"otaChannelId\": \"{{otaChannelId}}\",\n  \"externalReference\": \"AGD-{{$guid}}\",\n  \"guest\": {\n    \"fullName\": \"Nabila Putri\",\n    \"phone\": \"+6285711223344\",\n    \"email\": \"nabila@example.com\"\n  },\n  \"checkInDate\": \"{{checkInDate}}\",\n  \"checkOutDate\": \"{{checkOutDate}}\",\n  \"rooms\": [\n    {\n      \"roomTypeId\": \"{{roomTypeId}}\",\n      \"adults\": 2,\n      \"children\": 0,\n      \"otaRatePerNight\": 850000\n    }\n  ],\n  \"confirm\": true,\n  \"idempotencyKey\": \"{{$guid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Each new booking needs a unique idempotencyKey. For a retry, replace {{$guid}} with the same fixed key and resend the identical body. Fill all UUID variables and use configured stay dates."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.reservation?.id) pm.collectionVariables.set('reservationId', body.reservation?.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Read",
+      "item": [
+        {
+          "name": "List Reservations",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/reservations?page=1&limit=20",
+            "description": "Optional filters: search, source, reservationStatus, paymentStatus, stayDate, sort."
+          }
+        },
+        {
+          "name": "Reservation Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}",
+            "description": "Sets IDs from the first room, payment and deposit for follow-up requests."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.rooms?.[0]?.reservationRoom?.id) pm.collectionVariables.set('reservationRoomId', body.rooms?.[0]?.reservationRoom?.id);",
+                  "  if (body.payments?.[0]?.id) pm.collectionVariables.set('paymentId', body.payments?.[0]?.id);",
+                  "  if (body.deposits?.[0]?.id) pm.collectionVariables.set('depositId', body.deposits?.[0]?.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reservation History",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/history?page=1&limit=50"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lifecycle",
+      "item": [
+        {
+          "name": "Confirm Reservation",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/confirm",
+            "description": "Only Pending Phone/Walk-in reservations."
+          }
+        },
+        {
+          "name": "Check In",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/check-in",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"acknowledgeOutstanding\": true,\n  \"rooms\": [\n    {\n      \"reservationRoomId\": \"{{reservationRoomId}}\",\n      \"roomUnitId\": \"{{roomUnitId}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use Reservation Detail to obtain reservationRoomId. Add every unassigned room to rooms; omit rooms when all are already assigned."
+          }
+        },
+        {
+          "name": "Check Out",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/check-out",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"acknowledgeOutstanding\": true,\n  \"outstandingReason\": \"Outstanding balance will be followed up by front office\",\n  \"deposits\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "For reservations without a held deposit. Outstanding checkout requires permission and a reason."
+          }
+        },
+        {
+          "name": "Check Out with Deposit",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/check-out",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"acknowledgeOutstanding\": true,\n  \"outstandingReason\": \"Outstanding balance will be followed up by front office\",\n  \"deposits\": [\n    {\n      \"depositId\": \"{{depositId}}\",\n      \"refundAmount\": 200000,\n      \"deductionAmount\": 0,\n      \"deferRemaining\": false,\n      \"reason\": \"Deposit returned after room inspection\",\n      \"refundReference\": \"DEP-REF-001\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Choose exactly one decision for each held deposit. Refund requires payments.refund permission. For a balance deduction set deductionPurpose to balance; for damage set it to damage. Use amounts from Reservation Detail."
+          }
+        },
+        {
+          "name": "Cancel Reservation",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/cancel",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Cancelled at guest request\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Only Pending/Confirmed reservations. Review cancellation settlement before refund."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Finance",
+      "item": [
+        {
+          "name": "Record Payment",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/payments",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"{{$guid}}\",\n  \"methodId\": \"{{paymentMethodId}}\",\n  \"amount\": 300000,\n  \"notes\": \"Payment at front desk\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use a fixed idempotencyKey when retrying the same payment. Amount must not exceed the remaining balance."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.payment?.id) pm.collectionVariables.set('paymentId', body.payment?.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancellation Settlement",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/cancellation-settlement",
+            "description": "Available after cancellation. Review calculationStatus and estimatedRefundAmount before Refund."
+          }
+        },
+        {
+          "name": "Record Cancellation Refund",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/admin/reservations/{{reservationId}}/refunds",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentId\": \"{{paymentId}}\",\n  \"amount\": 300000,\n  \"reason\": \"Cancellation refund\",\n  \"reference\": \"REF-001\",\n  \"settlementOverrideReason\": \"Manual review completed for additional charges\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use a unique completed refund reference. Omit settlementOverrideReason when settlement is calculated. For manual_review_required it is mandatory."
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "checkInDate",
+      "value": "2026-10-10"
+    },
+    {
+      "key": "checkOutDate",
+      "value": "2026-10-12"
+    },
+    {
+      "key": "roomTypeId",
+      "value": ""
+    },
+    {
+      "key": "roomUnitId",
+      "value": ""
+    },
+    {
+      "key": "experienceVariantId",
+      "value": ""
+    },
+    {
+      "key": "paymentMethodId",
+      "value": ""
+    },
+    {
+      "key": "otaChannelId",
+      "value": ""
+    },
+    {
+      "key": "reservationId",
+      "value": ""
+    },
+    {
+      "key": "reservationRoomId",
+      "value": ""
+    },
+    {
+      "key": "paymentId",
+      "value": ""
+    },
+    {
+      "key": "depositId",
+      "value": ""
+    }
+  ]
+}

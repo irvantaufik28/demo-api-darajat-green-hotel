@@ -50,6 +50,20 @@
       "when": 1790967223492,
       "tag": "0006_military_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791007516651,
+      "tag": "0007_curious_the_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791012541194,
+      "tag": "0008_windy_toro",
+      "breakpoints": true
     }
   ]
 }

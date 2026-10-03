@@ -163,6 +163,12 @@ POST and PUT require `name`, `requiresCode`, `discountType`, `discountValue`, `m
 
 Campaign priority is unique within each channel (1 is highest). Creating or moving a campaign shifts priorities only in that channel. Migration `0005` normalizes existing priorities; migration `0006` separates Website and Front Desk campaigns, copies campaigns that previously applied to both, and removes OTA campaign targeting. Run migrations manually in order.
 
+## Admin Create Reservation API
+
+`POST /api/v1/admin/reservations` accepts `source: "walk_in"`, `"phone"`, or `"ota"`. Each entry in `rooms` represents one physical room and may include `roomUnitId`, `extraBeds`, `adultBreakfasts`, and `childBreakfasts`. Extra beds and breakfast are charged per room for every night. `experiences` contains experience variant IDs and quantities; payment and deposit are optional for Walk-in and Phone. Omit `payment` to keep the booking balance unpaid. Assigned room numbers must match the room type and must not overlap another active reservation.
+
+OTA creation requires `otaChannelId`, `externalReference`, `confirm: true`, and `otaRatePerNight` on every room. It uses voucher rates without campaign discounts and records a Paid/Confirmed booking with an external OTA payment reference. OTA bookings can be entered even when direct inventory has no configured rate or available stock; they still count as occupied inventory for future availability checks. OTA requests cannot include a direct payment, deposit, promo code, or cancellation policy. An active `payment_gateway` master item is required to record the OTA payment.
+
 ## Seed admin access
 
 Run migrations first. Set a temporary `SEED_USER_PASSWORD` of at least 5 characters in your local `.env`, then run `npm run db:seed`. The seed creates the five roles and five users shown in the admin's static data, along with its permission matrix. It can be rerun: matching records are updated, while passwords for existing users are preserved. Every newly created user receives the provided password. The seeded `deni@greenhero.id` account is inactive, matching the admin data. Remove `SEED_USER_PASSWORD` from `.env` when it is no longer needed.

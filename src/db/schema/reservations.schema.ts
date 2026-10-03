@@ -26,6 +26,9 @@ export const reservations = appSchema.table(
   {
     id: idColumn(),
     bookingCode: varchar("booking_code", { length: 40 }).notNull().unique(),
+    idempotencyKey: varchar("idempotency_key", { length: 160 }),
+    idempotencyRequestHash: varchar("idempotency_request_hash", { length: 64 }),
+    createResponseSnapshot: jsonb("create_response_snapshot"),
     guestId: uuid("guest_id")
       .notNull()
       .references(() => guests.id),
@@ -64,6 +67,9 @@ export const reservations = appSchema.table(
     uniqueIndex("reservations_ota_reference_uq")
       .on(table.otaChannelId, table.externalReference)
       .where(sql`${table.externalReference} is not null`),
+    uniqueIndex("reservations_idempotency_key_uq")
+      .on(table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} is not null`),
     check(
       "reservations_dates_guests_check",
       sql`${table.checkOutDate} > ${table.checkInDate} and ${table.adults} >= 0 and ${table.children} >= 0 and ${table.version} >= 1`,

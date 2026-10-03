@@ -10,6 +10,7 @@ import { experiences } from "../../db/schema/experiences.schema.js";
 import { guests } from "../../db/schema/guests.schema.js";
 import { masterItems } from "../../db/schema/master_items.schema.js";
 import { payments } from "../../db/schema/payments.schema.js";
+import { permissions } from "../../db/schema/permissions.schema.js";
 import { reservationCharges } from "../../db/schema/reservation_charges.schema.js";
 import { reservationDeposits } from "../../db/schema/reservation_deposits.schema.js";
 import { reservationExperiences } from "../../db/schema/reservation_experiences.schema.js";
@@ -17,9 +18,13 @@ import { reservationRoomExtraBeds } from "../../db/schema/reservation_room_extra
 import { reservationRoomNights } from "../../db/schema/reservation_room_nights.schema.js";
 import { reservationRooms } from "../../db/schema/reservation_rooms.schema.js";
 import { reservations } from "../../db/schema/reservations.schema.js";
+import { rolePermissions } from "../../db/schema/role_permissions.schema.js";
 import { roomInventoryDaily } from "../../db/schema/room_inventory_daily.schema.js";
 import { roomTypeCapacityPatterns } from "../../db/schema/room_type_capacity_patterns.schema.js";
 import { roomUnits } from "../../db/schema/room_units.schema.js";
+import { recordReservationEvent } from "./reservation-events.service.js";
+import { requestHash } from "./reservation-idempotency.js";
+import { calculateReservationTotal, ReservationTotalError } from "./reservation-total.service.js";
 import { databaseErrorCode, uuidSchema } from "../master/master.shared.js";
 import { readRoomAvailability, stayDates } from "./reservations-availability.service.js";
 import {
@@ -102,20 +107,27 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
       schema: { body: reservationQuoteBodySchema },
     },
     async (request, reply) => {
-      const { source, checkInDate, checkOutDate, promoCode, rooms } = request.body;
+      const {
+        source,
+        checkInDate,
+        checkOutDate,
+        promoCode,
+        rooms,
+        experiences: selectedExperiences = [],
+      } = request.body;
       const dates = stayDates(checkInDate, checkOutDate);
       if (!dates) {
         return reply
           .code(400)
           .send(errorBody("INVALID_STAY_DATES", "Use valid dates for a stay of 1 to 366 nights"));
       }
-      const roomCount = rooms.reduce((sum, room) => sum + room.quantity, 0);
-      if (roomCount > 20) {
-        return reply.code(400).send(errorBody("TOO_MANY_ROOMS", "Select at most 20 rooms"));
+      const roomCount = rooms.length;
+      if (rooms.every((room) => room.adults === 0 && room.children === 0)) {
+        return reply.code(400).send(errorBody("INVALID_ROOMS", "At least one guest is required"));
       }
       const requested = new Map<string, number>();
       for (const room of rooms) {
-        requested.set(room.roomTypeId, (requested.get(room.roomTypeId) ?? 0) + room.quantity);
+        requested.set(room.roomTypeId, (requested.get(room.roomTypeId) ?? 0) + 1);
       }
       const options = await readRoomAvailability(app.db, checkInDate, checkOutDate, dates, [
         ...requested.keys(),
@@ -129,9 +141,59 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             .send(errorBody("ROOM_UNAVAILABLE", `Room type ${roomTypeId} is unavailable`));
         }
       }
-      const selectedRooms = rooms.flatMap((room) =>
-        Array.from({ length: room.quantity }, () => room.roomTypeId),
-      );
+      const selectedUnitIds = rooms
+        .map((room) => room.roomUnitId)
+        .filter((id): id is string => Boolean(id));
+      if (new Set(selectedUnitIds).size !== selectedUnitIds.length) {
+        return reply
+          .code(400)
+          .send(errorBody("DUPLICATE_ROOM", "A room number can only be assigned once"));
+      }
+      for (const room of rooms) {
+        if (
+          room.roomUnitId &&
+          !byType
+            .get(room.roomTypeId)!
+            .assignableRoomUnits.some((unit) => unit.id === room.roomUnitId)
+        ) {
+          return reply
+            .code(409)
+            .send(errorBody("ROOM_UNIT_UNAVAILABLE", "Assigned room is unavailable for this stay"));
+        }
+      }
+      const capacities = await app.db
+        .select({
+          roomTypeId: roomTypeCapacityPatterns.roomTypeId,
+          adults: capacityPatterns.adults,
+          children: capacityPatterns.children,
+          extraBeds: roomTypeCapacityPatterns.extraBeds,
+        })
+        .from(roomTypeCapacityPatterns)
+        .innerJoin(
+          capacityPatterns,
+          eq(roomTypeCapacityPatterns.capacityPatternId, capacityPatterns.id),
+        )
+        .where(
+          and(
+            inArray(roomTypeCapacityPatterns.roomTypeId, [...requested.keys()]),
+            eq(capacityPatterns.isActive, true),
+          ),
+        );
+      for (const room of rooms) {
+        if (
+          !capacities.some(
+            (capacity) =>
+              capacity.roomTypeId === room.roomTypeId &&
+              capacity.adults === room.adults &&
+              capacity.children === room.children &&
+              capacity.extraBeds <= (room.extraBeds ?? 0),
+          )
+        ) {
+          return reply
+            .code(400)
+            .send(errorBody("INVALID_CAPACITY", "Guest count is not allowed for this room type"));
+        }
+      }
       try {
         const price = await priceRoomNights(app.db, {
           source,
@@ -139,25 +201,84 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
           bookingDate: bookingDateJakarta(),
           nights: dates.length,
           roomCount,
-          rows: selectedRooms.flatMap((roomTypeId, roomIndex) =>
-            byType.get(roomTypeId)!.nightlyRates.map((night) => ({
+          rows: rooms.flatMap((room, roomIndex) =>
+            byType.get(room.roomTypeId)!.nightlyRates.map((night) => ({
               roomIndex,
-              roomTypeId,
+              roomTypeId: room.roomTypeId,
               stayDate: night.stayDate,
               basePrice: night.basePrice!,
             })),
           ),
         });
+        const selectedVariants = selectedExperiences.length
+          ? await app.db
+              .select({ variant: experienceVariants, experience: experiences })
+              .from(experienceVariants)
+              .innerJoin(experiences, eq(experienceVariants.experienceId, experiences.id))
+              .where(
+                inArray(
+                  experienceVariants.id,
+                  selectedExperiences.map((item) => item.variantId),
+                ),
+              )
+          : [];
+        for (const item of selectedExperiences) {
+          if (
+            item.serviceDate &&
+            (item.serviceDate < checkInDate ||
+              item.serviceDate >= checkOutDate ||
+              !stayDates(item.serviceDate, checkOutDate))
+          ) {
+            return reply
+              .code(400)
+              .send(errorBody("INVALID_SERVICE_DATE", "Experience date must fall within the stay"));
+          }
+        }
+        const totals = calculateReservationTotal({
+          rooms,
+          roomRates: new Map(options.map((option) => [option.roomType.id, option.roomType])),
+          roomNights: price.rows,
+          nights: dates.length,
+          experiences: selectedExperiences,
+          experienceRates: new Map(
+            selectedVariants
+              .filter((row) => row.experience.isActive)
+              .map((row) => [
+                row.variant.id,
+                {
+                  name: `${row.experience.name} · ${row.variant.subName}`,
+                  unitPrice: row.variant.price,
+                },
+              ]),
+          ),
+        });
+        const paidAmount = request.body.paymentAmount ?? 0;
+        if (paidAmount > totals.bookingTotal) {
+          return reply
+            .code(400)
+            .send(errorBody("INVALID_PAYMENT", "Payment exceeds the booking total"));
+        }
         return {
           checkInDate,
           checkOutDate,
           nights: dates.length,
           roomCount,
           ...price,
+          charges: totals,
+          bookingTotal: totals.bookingTotal,
+          paidAmount,
+          paymentStatus:
+            paidAmount === totals.bookingTotal ? "paid" : paidAmount > 0 ? "partial" : "unpaid",
+          remainingBalance: totals.bookingTotal - paidAmount,
+          depositAmount: request.body.depositAmount ?? 0,
+          totalCollected: paidAmount + (request.body.depositAmount ?? 0),
         };
       } catch (error) {
         if (error instanceof InvalidPromoCodeError) {
           return reply.code(400).send(errorBody("INVALID_PROMO_CODE", error.message));
+        }
+        if (error instanceof ReservationTotalError) {
+          return reply.code(400).send(errorBody(error.code, error.message));
         }
         throw error;
       }
@@ -172,6 +293,13 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const body = request.body;
+      const idempotencyKey = body.idempotencyKey.trim();
+      if (idempotencyKey.length < 8) {
+        return reply
+          .code(400)
+          .send(errorBody("INVALID_IDEMPOTENCY_KEY", "Use at least 8 characters"));
+      }
+      const idempotencyRequestHash = requestHash(body);
       const dates = stayDates(body.checkInDate, body.checkOutDate);
       if (!dates) {
         return reply
@@ -186,11 +314,61 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
       if (body.guest && !body.guest.fullName.trim()) {
         return reply.code(400).send(errorBody("INVALID_GUEST", "Guest name is required"));
       }
+      if (body.checkIn && (!body.confirm || body.source === "ota")) {
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "INVALID_CHECK_IN",
+              "Direct check-in requires a confirmed Walk-in or Phone reservation",
+            ),
+          );
+      }
       if (body.source === "walk_in" && body.cancellationPolicyId) {
         return reply
           .code(400)
           .send(
             errorBody("INVALID_POLICY", "Walk-in reservations do not use cancellation policies"),
+          );
+      }
+      if (body.source === "ota") {
+        if (!body.otaChannelId || !body.externalReference?.trim()) {
+          return reply
+            .code(400)
+            .send(errorBody("INVALID_OTA_BOOKING", "OTA channel and reference are required"));
+        }
+        if (!body.confirm || body.rooms.some((room) => !room.otaRatePerNight)) {
+          return reply
+            .code(400)
+            .send(
+              errorBody(
+                "INVALID_OTA_BOOKING",
+                "Confirmed OTA bookings require a voucher rate for every room",
+              ),
+            );
+        }
+        if (body.promoCode || body.cancellationPolicyId || body.payment || body.deposit) {
+          return reply
+            .code(400)
+            .send(
+              errorBody(
+                "INVALID_OTA_BOOKING",
+                "OTA voucher payment and policy are managed by the OTA channel",
+              ),
+            );
+        }
+      } else if (
+        body.otaChannelId ||
+        body.externalReference ||
+        body.rooms.some((room) => room.otaRatePerNight !== undefined)
+      ) {
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "INVALID_SOURCE_FIELDS",
+              "OTA fields are only available for OTA reservations",
+            ),
           );
       }
       if (body.rooms.every((room) => room.adults === 0 && room.children === 0)) {
@@ -204,6 +382,16 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
           .code(400)
           .send(errorBody("DUPLICATE_ROOM", "A room number can only be assigned once"));
       }
+      if (body.checkIn && assignedUnitIds.length !== body.rooms.length) {
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "ROOM_ASSIGNMENT_REQUIRED",
+              "Assign a room number to every room before check-in",
+            ),
+          );
+      }
 
       const requestedCounts = new Map<string, number>();
       for (const room of body.rooms) {
@@ -213,7 +401,48 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
       const bookingDate = bookingDateJakarta();
 
       try {
-        const result = await app.db.transaction(async (tx) => {
+        const outcome = await app.db.transaction(async (tx) => {
+          if (body.checkIn) {
+            const [checkInPermission] = await tx
+              .select({ id: permissions.id })
+              .from(rolePermissions)
+              .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
+              .where(
+                and(
+                  eq(rolePermissions.roleId, request.authUser!.roleId),
+                  eq(permissions.code, "reservations.check_in"),
+                ),
+              )
+              .limit(1);
+            if (!checkInPermission) {
+              throw new ReservationInputError(
+                "CHECK_IN_FORBIDDEN",
+                "Permission to check in a guest is required",
+                403,
+              );
+            }
+          }
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtext(${`reservation-create:${idempotencyKey}`}))`,
+          );
+          const [existing] = await tx
+            .select({
+              idempotencyRequestHash: reservations.idempotencyRequestHash,
+              createResponseSnapshot: reservations.createResponseSnapshot,
+            })
+            .from(reservations)
+            .where(eq(reservations.idempotencyKey, idempotencyKey))
+            .limit(1);
+          if (existing) {
+            if (existing.idempotencyRequestHash !== idempotencyRequestHash) {
+              throw new ReservationInputError(
+                "IDEMPOTENCY_KEY_REUSED",
+                "Idempotency key was already used with a different request",
+                409,
+              );
+            }
+            return { reservation: existing.createResponseSnapshot, replayed: true };
+          }
           // Serialize bookings for each room type before reading occupied inventory.
           for (const roomTypeId of roomTypeIds) {
             await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${roomTypeId}))`);
@@ -242,7 +471,10 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
           const availabilityByType = new Map(availability.map((item) => [item.roomType.id, item]));
           for (const [roomTypeId, quantity] of requestedCounts) {
             const option = availabilityByType.get(roomTypeId);
-            if (!option || !option.bookable || option.availableRooms < quantity) {
+            if (
+              !option ||
+              (body.source !== "ota" && (!option.bookable || option.availableRooms < quantity))
+            ) {
               throw new ReservationInputError(
                 "ROOM_UNAVAILABLE",
                 `Room type ${roomTypeId} is unavailable for the requested stay`,
@@ -274,7 +506,8 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               unit.roomTypeId !== room.roomTypeId ||
               !unit.isActive ||
               ["maintenance", "out_of_service"].includes(unit.operationalStatus) ||
-              (body.checkInDate <= bookingDate && unit.operationalStatus !== "available")
+              ((body.checkIn || body.checkInDate <= bookingDate) &&
+                unit.operationalStatus !== "available")
             ) {
               throw new ReservationInputError(
                 "ROOM_UNIT_UNAVAILABLE",
@@ -362,10 +595,54 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                 roomIndex,
                 roomTypeId: room.roomTypeId,
                 stayDate,
-                basePrice: inventoryByKey.get(`${room.roomTypeId}:${stayDate}`)!.basePrice,
+                basePrice:
+                  body.source === "ota"
+                    ? room.otaRatePerNight!
+                    : inventoryByKey.get(`${room.roomTypeId}:${stayDate}`)!.basePrice,
               })),
             ),
           });
+
+          let otaPaymentMethodId: string | null = null;
+          let otaProvider: string | null = null;
+          if (body.source === "ota") {
+            const [otaChannel] = await tx
+              .select({ id: masterItems.id, code: masterItems.code })
+              .from(masterItems)
+              .where(
+                and(
+                  eq(masterItems.id, body.otaChannelId!),
+                  eq(masterItems.category, "ota_channels"),
+                  eq(masterItems.isActive, true),
+                ),
+              )
+              .limit(1);
+            if (!otaChannel) {
+              throw new ReservationInputError(
+                "INVALID_OTA_CHANNEL",
+                "OTA channel not found or inactive",
+              );
+            }
+            const [gatewayMethod] = await tx
+              .select({ id: masterItems.id })
+              .from(masterItems)
+              .where(
+                and(
+                  eq(masterItems.category, "payment_methods"),
+                  eq(masterItems.code, "payment_gateway"),
+                  eq(masterItems.isActive, true),
+                ),
+              )
+              .limit(1);
+            if (!gatewayMethod) {
+              throw new ReservationInputError(
+                "INVALID_PAYMENT_METHOD",
+                "Active Payment Gateway method is required for OTA settlement",
+              );
+            }
+            otaPaymentMethodId = gatewayMethod.id;
+            otaProvider = `ota:${otaChannel.code}`;
+          }
 
           const methodIds = [body.payment?.methodId, body.deposit?.methodId].filter(
             (id): id is string => Boolean(id),
@@ -485,24 +762,34 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             }
           }
 
-          let bookingTotal = priced.roomTotal;
-          for (const room of body.rooms) {
-            const option = availabilityByType.get(room.roomTypeId)!;
-            bookingTotal +=
-              (room.extraBeds ?? 0) * option.roomType.extraBedPricePerNight * dates.length;
-            bookingTotal +=
-              (room.adultBreakfasts ?? 0) * option.roomType.adultBreakfastPrice * dates.length;
-            bookingTotal +=
-              (room.childBreakfasts ?? 0) * option.roomType.childBreakfastPrice * dates.length;
-          }
-          for (const item of body.experiences ?? []) {
-            bookingTotal += variantById.get(item.variantId)!.variant.price * item.quantity;
-          }
-          if (
-            !Number.isSafeInteger(bookingTotal) ||
-            (body.payment && body.payment.amount > bookingTotal)
-          ) {
+          const totals = calculateReservationTotal({
+            rooms: body.rooms,
+            roomRates: new Map(availability.map((option) => [option.roomType.id, option.roomType])),
+            roomNights: priced.rows,
+            nights: dates.length,
+            experiences: body.experiences ?? [],
+            experienceRates: new Map(
+              selectedVariants.map((row) => [
+                row.variant.id,
+                {
+                  name: `${row.experience.name} · ${row.variant.subName}`,
+                  unitPrice: row.variant.price,
+                },
+              ]),
+            ),
+          });
+          const bookingTotal = totals.bookingTotal;
+          if (body.payment && body.payment.amount > bookingTotal) {
             throw new ReservationInputError("INVALID_PAYMENT", "Payment exceeds the booking total");
+          }
+          const paidAmount = body.source === "ota" ? bookingTotal : (body.payment?.amount ?? 0);
+          const remainingBalance = bookingTotal - paidAmount;
+          if (body.checkIn && remainingBalance > 0 && body.acknowledgeOutstanding !== true) {
+            throw new ReservationInputError(
+              "OUTSTANDING_CONFIRMATION_REQUIRED",
+              "Confirm the outstanding balance before check-in",
+              409,
+            );
           }
 
           let guestId = body.guestId;
@@ -527,15 +814,23 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
 
           const id = randomUUID();
           const bookingCode = `GH-${id.replaceAll("-", "").slice(0, 12).toUpperCase()}`;
-          const paidAmount = body.payment?.amount ?? 0;
           const paymentStatus =
-            paidAmount === 0 ? "unpaid" : paidAmount === bookingTotal ? "paid" : "partial";
-          const reservationStatus = body.confirm ? "confirmed" : "pending";
+            paidAmount === bookingTotal ? "paid" : paidAmount > 0 ? "partial" : "unpaid";
+          const reservationStatus = body.checkIn
+            ? "checked_in"
+            : body.confirm
+              ? "confirmed"
+              : "pending";
+          const checkedInAt = body.checkIn ? new Date() : null;
           await tx.insert(reservations).values({
             id,
             bookingCode,
+            idempotencyKey,
+            idempotencyRequestHash,
             guestId,
             source: body.source,
+            otaChannelId: body.source === "ota" ? body.otaChannelId : null,
+            externalReference: body.source === "ota" ? body.externalReference!.trim() : null,
             checkInDate: body.checkInDate,
             checkOutDate: body.checkOutDate,
             adults: body.rooms.reduce((sum, room) => sum + room.adults, 0),
@@ -548,9 +843,15 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             specialRequests: nullable(body.specialRequests),
             internalNotes: nullable(body.internalNotes),
             confirmedAt: body.confirm ? new Date() : null,
+            checkedInAt,
             createdByUserId: request.authUser!.id,
           });
 
+          const createdRoomAssignments: {
+            reservationRoomId: string;
+            roomUnitId: string;
+            roomNumber: string;
+          }[] = [];
           for (const [roomIndex, room] of body.rooms.entries()) {
             const option = availabilityByType.get(room.roomTypeId)!;
             const roomNights = priced.rows.filter((night) => night.roomIndex === roomIndex);
@@ -569,6 +870,13 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                   : null,
               })
               .returning({ id: reservationRooms.id });
+            if (room.roomUnitId) {
+              createdRoomAssignments.push({
+                reservationRoomId: createdRoom.id,
+                roomUnitId: room.roomUnitId,
+                roomNumber: assignedById.get(room.roomUnitId)!.roomNumber,
+              });
+            }
             await tx.insert(reservationRoomNights).values(
               roomNights.map((night) => ({
                 reservationRoomId: createdRoom.id,
@@ -651,30 +959,130 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               createdByUserId: request.authUser!.id,
             });
           }
-          if (body.payment) {
-            await tx.insert(payments).values({
+          const [initialPayment] =
+            body.payment || (body.source === "ota" && otaPaymentMethodId)
+              ? await tx
+                  .insert(payments)
+                  .values({
+                    reservationId: id,
+                    methodId: body.payment?.methodId ?? otaPaymentMethodId!,
+                    amount: body.payment?.amount ?? bookingTotal,
+                    provider: otaProvider,
+                    providerReference:
+                      body.source === "ota" ? body.externalReference!.trim() : null,
+                    status: "succeeded",
+                    paidAt: new Date(),
+                    notes: body.source === "ota" ? "Prepaid by OTA" : nullable(body.payment?.notes),
+                    recordedByUserId: request.authUser!.id,
+                  })
+                  .returning({ id: payments.id })
+              : [];
+          const [initialDeposit] = body.deposit
+            ? await tx
+                .insert(reservationDeposits)
+                .values({
+                  reservationId: id,
+                  methodId: body.deposit.methodId,
+                  amountHeld: body.deposit.amount,
+                  notes: nullable(body.deposit.notes),
+                })
+                .returning({ id: reservationDeposits.id })
+            : [];
+
+          const eventBaseTime = new Date();
+          let eventOffset = 0;
+          const nextEventTime = () => new Date(eventBaseTime.getTime() + eventOffset++);
+          await recordReservationEvent(tx, {
+            reservationId: id,
+            eventType: "reservation.created",
+            actorType: "user",
+            actorUserId: request.authUser!.id,
+            occurredAt: nextEventTime(),
+            reservationStatusAfter: "pending",
+            paymentStatusAfter: "unpaid",
+            details: {
+              bookingCode,
+              source: body.source,
+              bookingTotal,
+              roomCount: body.rooms.length,
+            },
+          });
+          if (initialPayment) {
+            await recordReservationEvent(tx, {
               reservationId: id,
-              methodId: body.payment.methodId,
-              amount: body.payment.amount,
-              status: "succeeded",
-              paidAt: new Date(),
-              notes: nullable(body.payment.notes),
-              recordedByUserId: request.authUser!.id,
+              eventType: "payment.recorded",
+              actorType: body.source === "ota" ? "gateway" : "user",
+              actorUserId: body.source === "ota" ? null : request.authUser!.id,
+              occurredAt: nextEventTime(),
+              reservationStatusBefore: "pending",
+              reservationStatusAfter: "pending",
+              paymentStatusBefore: "unpaid",
+              paymentStatusAfter: paymentStatus,
+              referenceId: initialPayment.id,
+              details: {
+                amount: paidAmount,
+                source: body.source,
+                methodId: body.payment?.methodId ?? otaPaymentMethodId,
+              },
             });
           }
-          if (body.deposit) {
-            await tx.insert(reservationDeposits).values({
+          if (initialDeposit) {
+            await recordReservationEvent(tx, {
               reservationId: id,
-              methodId: body.deposit.methodId,
-              amountHeld: body.deposit.amount,
-              notes: nullable(body.deposit.notes),
+              eventType: "deposit.held",
+              actorType: "user",
+              actorUserId: request.authUser!.id,
+              occurredAt: nextEventTime(),
+              reservationStatusBefore: "pending",
+              reservationStatusAfter: "pending",
+              paymentStatusBefore: paymentStatus,
+              paymentStatusAfter: paymentStatus,
+              referenceId: initialDeposit.id,
+              details: { amount: body.deposit!.amount, methodId: body.deposit!.methodId },
             });
           }
-          return {
+          if (body.confirm) {
+            await recordReservationEvent(tx, {
+              reservationId: id,
+              eventType: "reservation.confirmed",
+              actorType: body.source === "ota" ? "system" : "user",
+              actorUserId: body.source === "ota" ? null : request.authUser!.id,
+              occurredAt: nextEventTime(),
+              reservationStatusBefore: "pending",
+              reservationStatusAfter: "confirmed",
+              paymentStatusBefore: paymentStatus,
+              paymentStatusAfter: paymentStatus,
+              details: { bookingCode, source: body.source, automatic: body.source === "ota" },
+            });
+          }
+          if (body.checkIn) {
+            await tx
+              .update(roomUnits)
+              .set({ operationalStatus: "occupied", updatedAt: checkedInAt! })
+              .where(inArray(roomUnits.id, assignedUnitIds));
+            await recordReservationEvent(tx, {
+              reservationId: id,
+              eventType: "guest.checked_in",
+              actorType: "user",
+              actorUserId: request.authUser!.id,
+              occurredAt: nextEventTime(),
+              reservationStatusBefore: "confirmed",
+              reservationStatusAfter: "checked_in",
+              paymentStatusBefore: paymentStatus,
+              paymentStatusAfter: paymentStatus,
+              details: {
+                rooms: createdRoomAssignments,
+                remainingBalance,
+                outstandingAcknowledged: remainingBalance > 0,
+              },
+            });
+          }
+          const result = {
             id,
             bookingCode,
             reservationStatus,
             paymentStatus,
+            checkedInAt,
             bookingTotal,
             discountTotal: priced.discountTotal,
             appliedCampaigns: priced.appliedCampaigns,
@@ -687,6 +1095,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               extraBeds: room.extraBeds ?? 0,
               adultBreakfasts: room.adultBreakfasts ?? 0,
               childBreakfasts: room.childBreakfasts ?? 0,
+              otaRatePerNight: body.source === "ota" ? room.otaRatePerNight : null,
             })),
             experiences: (body.experiences ?? []).map((item) => ({
               variantId: item.variantId,
@@ -695,22 +1104,35 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               unitPrice: variantById.get(item.variantId)!.variant.price,
             })),
             paidAmount,
-            remainingBalance: bookingTotal - paidAmount,
+            remainingBalance,
             payment: body.payment
               ? { methodId: body.payment.methodId, amount: body.payment.amount }
-              : null,
+              : body.source === "ota"
+                ? { methodId: otaPaymentMethodId, amount: bookingTotal, provider: otaProvider }
+                : null,
+            otaChannelId: body.source === "ota" ? body.otaChannelId : null,
+            externalReference: body.source === "ota" ? body.externalReference!.trim() : null,
+            settlement: body.source === "ota" ? "prepaid_by_ota" : null,
             deposit: body.deposit
               ? { methodId: body.deposit.methodId, amountHeld: body.deposit.amount }
               : null,
           };
+          await tx
+            .update(reservations)
+            .set({ createResponseSnapshot: result })
+            .where(eq(reservations.id, id));
+          return { reservation: result, replayed: false };
         });
-        return reply.code(201).send({ reservation: result });
+        return reply.code(outcome.replayed ? 200 : 201).send(outcome);
       } catch (error) {
         if (error instanceof InvalidPromoCodeError) {
           return reply.code(400).send(errorBody("INVALID_PROMO_CODE", error.message));
         }
         if (error instanceof ReservationInputError) {
           return reply.code(error.statusCode).send(errorBody(error.code, error.message));
+        }
+        if (error instanceof ReservationTotalError) {
+          return reply.code(400).send(errorBody(error.code, error.message));
         }
         if (databaseErrorCode(error) === "23503") {
           return reply

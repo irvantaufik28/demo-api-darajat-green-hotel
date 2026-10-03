@@ -3,6 +3,7 @@ import { uuidSchema } from "../master/master.shared.js";
 export type ReservationRoomInput = {
   roomTypeId: string;
   roomUnitId?: string;
+  otaRatePerNight?: number;
   adults: number;
   children: number;
   extraBeds?: number;
@@ -11,13 +12,18 @@ export type ReservationRoomInput = {
 };
 
 export type CreateReservationBody = {
-  source: "walk_in" | "phone";
+  idempotencyKey: string;
+  source: "walk_in" | "phone" | "ota";
+  otaChannelId?: string;
+  externalReference?: string;
   guestId?: string;
   guest?: { fullName: string; phone?: string | null; email?: string | null };
   checkInDate: string;
   checkOutDate: string;
   rooms: ReservationRoomInput[];
   confirm: boolean;
+  checkIn?: boolean;
+  acknowledgeOutstanding?: boolean;
   promoCode?: string | null;
   cancellationPolicyId?: string | null;
   specialRequests?: string | null;
@@ -32,7 +38,10 @@ export type ReservationQuoteBody = {
   checkInDate: string;
   checkOutDate: string;
   promoCode?: string | null;
-  rooms: { roomTypeId: string; quantity: number }[];
+  rooms: Omit<ReservationRoomInput, "otaRatePerNight">[];
+  experiences?: { variantId: string; quantity: number; serviceDate?: string | null }[];
+  paymentAmount?: number;
+  depositAmount?: number;
 };
 
 const stayDateSchema = { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" } as const;
@@ -69,23 +78,46 @@ export const reservationQuoteBodySchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["roomTypeId", "quantity"],
+        required: ["roomTypeId", "adults", "children"],
         properties: {
           roomTypeId: uuidSchema,
           roomUnitId: uuidSchema,
-          quantity: { type: "integer", minimum: 1, maximum: 20 },
+          adults: { type: "integer", minimum: 0, maximum: 32767 },
+          children: { type: "integer", minimum: 0, maximum: 32767 },
+          extraBeds: { type: "integer", minimum: 0, maximum: 32767 },
+          adultBreakfasts: { type: "integer", minimum: 0, maximum: 32767 },
+          childBreakfasts: { type: "integer", minimum: 0, maximum: 32767 },
         },
       },
     },
+    experiences: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["variantId", "quantity"],
+        properties: {
+          variantId: uuidSchema,
+          quantity: { type: "integer", minimum: 1, maximum: 32767 },
+          serviceDate: { anyOf: [stayDateSchema, { type: "null" }] },
+        },
+      },
+    },
+    paymentAmount: { type: "integer", minimum: 0, maximum: 9007199254740991 },
+    depositAmount: { type: "integer", minimum: 0, maximum: 9007199254740991 },
   },
 } as const;
 
 export const createReservationBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["source", "checkInDate", "checkOutDate", "rooms", "confirm"],
+  required: ["idempotencyKey", "source", "checkInDate", "checkOutDate", "rooms", "confirm"],
   properties: {
-    source: { type: "string", enum: ["walk_in", "phone"] },
+    idempotencyKey: { type: "string", minLength: 8, maxLength: 160 },
+    source: { type: "string", enum: ["walk_in", "phone", "ota"] },
+    otaChannelId: uuidSchema,
+    externalReference: { type: "string", minLength: 1, maxLength: 120 },
     guestId: uuidSchema,
     guest: {
       type: "object",
@@ -109,6 +141,8 @@ export const createReservationBodySchema = {
         required: ["roomTypeId", "adults", "children"],
         properties: {
           roomTypeId: uuidSchema,
+          roomUnitId: uuidSchema,
+          otaRatePerNight: { type: "integer", minimum: 1, maximum: 9007199254740991 },
           adults: { type: "integer", minimum: 0, maximum: 32767 },
           children: { type: "integer", minimum: 0, maximum: 32767 },
           extraBeds: { type: "integer", minimum: 0, maximum: 32767 },
@@ -118,6 +152,8 @@ export const createReservationBodySchema = {
       },
     },
     confirm: { type: "boolean" },
+    checkIn: { type: "boolean" },
+    acknowledgeOutstanding: { type: "boolean" },
     promoCode: {
       anyOf: [{ type: "string", maxLength: 80, pattern: "^[A-Za-z0-9_-]*$" }, { type: "null" }],
     },
