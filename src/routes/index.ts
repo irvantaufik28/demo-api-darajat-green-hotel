@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { healthRoutes } from "../modules/health/health.routes.js";
+import { healthRoutes } from "../modules/health/index.js";
 import { adminRoutes } from "./admin/index.js";
 import { publicRoutes } from "./public/index.js";
 

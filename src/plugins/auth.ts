@@ -37,7 +37,11 @@ const unauthorized = { error: { code: "UNAUTHORIZED", message: "Authentication r
 
 export function registerAuth(app: FastifyInstance, config: AppConfig): void {
   app.register(cookie);
-  app.register(cors, { origin: config.corsOrigins, credentials: true });
+  app.register(cors, {
+    origin: config.corsOrigins,
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  });
   app.register(jwt, { secret: config.jwtSecret });
   app.register(rateLimit, { global: false });
   app.decorate("authConfig", config);

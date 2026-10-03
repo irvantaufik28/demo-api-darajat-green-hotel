@@ -3,8 +3,8 @@ import { payments } from "../../db/schema/payments.schema.js";
 import { reservationCharges } from "../../db/schema/reservation_charges.schema.js";
 import { reservationDeposits } from "../../db/schema/reservation_deposits.schema.js";
 import type { Database } from "../../plugins/database.js";
-import { recordReservationEvent } from "./reservation-events.service.js";
-import type { readReservationFinancials } from "./reservation-financials.service.js";
+import { recordReservationEvent } from "./services/reservation-events.service.js";
+import type { readReservationFinancials } from "./services/reservation-financials.service.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Financials = Awaited<ReturnType<typeof readReservationFinancials>>;

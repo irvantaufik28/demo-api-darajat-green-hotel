@@ -1,0 +1,14 @@
+export { reservationListRoutes } from "./routes/reservations-list.routes.js";
+export { reservationArrivalsTodayRoutes } from "./routes/reservations-arrivals-today.routes.js";
+export { reservationDeparturesTodayRoutes } from "./routes/reservations-departures-today.routes.js";
+export { reservationInHouseRoutes } from "./routes/reservations-in-house.routes.js";
+export { reservationCreateRoutes } from "./routes/reservations-create.routes.js";
+export { reservationDetailRoutes } from "./routes/reservations-detail.routes.js";
+export { reservationHistoryRoutes } from "./routes/reservations-history.routes.js";
+export { reservationPaymentRoutes } from "./routes/reservations-payment.routes.js";
+export { reservationConfirmRoutes } from "./routes/reservations-confirm.routes.js";
+export { reservationCheckInRoutes } from "./routes/reservations-check-in.routes.js";
+export { reservationCheckOutRoutes } from "./routes/reservations-check-out.routes.js";
+export { reservationCancelRoutes } from "./routes/reservations-cancel.routes.js";
+export { reservationCancellationSettlementRoutes } from "./routes/reservations-cancellation-settlement.routes.js";
+export { reservationRefundRoutes } from "./routes/reservations-refund.routes.js";
