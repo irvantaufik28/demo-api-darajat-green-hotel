@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { experienceVariants } from "../../../db/schema/experience_variants.schema.js";
 import { experiences } from "../../../db/schema/experiences.schema.js";
@@ -65,7 +65,11 @@ async function getDetail(app: Parameters<FastifyPluginAsync>[0], id: string) {
   return { ...row.experience, category: row.category, variants };
 }
 
-async function validateCategory(app: Parameters<FastifyPluginAsync>[0], categoryId: string) {
+async function validateCategory(
+  app: Parameters<FastifyPluginAsync>[0],
+  categoryId: string,
+  allowInactive = false,
+) {
   const [category] = await app.db
     .select({ id: masterItems.id })
     .from(masterItems)
@@ -73,7 +77,7 @@ async function validateCategory(app: Parameters<FastifyPluginAsync>[0], category
       and(
         eq(masterItems.id, categoryId),
         eq(masterItems.category, "experience_categories"),
-        eq(masterItems.isActive, true),
+        allowInactive ? undefined : eq(masterItems.isActive, true),
       ),
     )
     .limit(1);
@@ -116,7 +120,12 @@ export const experienceRoutes: FastifyPluginAsync = async (app) => {
     async (request) => {
       const { search, categoryId, isActive, page = 1, limit = 20 } = request.query;
       const filter = and(
-        search?.trim() ? ilike(experiences.name, `%${search.trim()}%`) : undefined,
+        search?.trim()
+          ? or(
+              ilike(experiences.name, `%${search.trim()}%`),
+              ilike(experiences.description, `%${search.trim()}%`),
+            )
+          : undefined,
         categoryId ? eq(experiences.categoryId, categoryId) : undefined,
         isActive === undefined ? undefined : eq(experiences.isActive, isActive),
       );
@@ -242,7 +251,17 @@ export const experienceRoutes: FastifyPluginAsync = async (app) => {
       } catch (error) {
         return reply.code(400).send(errorBody("INVALID_EXPERIENCE", (error as Error).message));
       }
-      if (!(await validateCategory(app, request.body.categoryId))) {
+      const [current] = await app.db
+        .select({ categoryId: experiences.categoryId })
+        .from(experiences)
+        .where(eq(experiences.id, request.params.id))
+        .limit(1);
+      if (!current) return reply.code(404).send(errorBody("NOT_FOUND", "Experience not found"));
+      if (!(await validateCategory(
+        app,
+        request.body.categoryId,
+        request.body.categoryId === current.categoryId,
+      ))) {
         return reply
           .code(400)
           .send(errorBody("INVALID_CATEGORY", "Experience category not found or inactive"));

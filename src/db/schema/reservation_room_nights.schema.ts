@@ -1,10 +1,23 @@
 import { sql } from "drizzle-orm";
-import { check, date, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, date, jsonb, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { idColumn, rupiah } from "./columns.js";
-import { campaigns } from "./campaigns.schema.js";
 import { reservationRooms } from "./reservation_rooms.schema.js";
 
 import { appSchema } from "./app-schema.js";
+
+export type ReservationCampaignSnapshot = {
+  id: string;
+  name: string;
+  promoCode: string | null;
+  channel: string;
+  discountType: string;
+  discountValue: number;
+  priority: number;
+  bookingStart: string | null;
+  bookingEnd: string | null;
+  stayStart: string | null;
+  stayEnd: string | null;
+};
 
 export const reservationRoomNights = appSchema.table(
   "reservation_room_nights",
@@ -17,7 +30,7 @@ export const reservationRoomNights = appSchema.table(
     basePrice: rupiah("base_price").notNull().default(0),
     discountAmount: rupiah("discount_amount").notNull().default(0),
     finalPrice: rupiah("final_price").notNull().default(0),
-    campaignId: uuid("campaign_id").references(() => campaigns.id),
+    campaignSnapshot: jsonb("campaign_snapshot").$type<ReservationCampaignSnapshot>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

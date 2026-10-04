@@ -89,6 +89,13 @@ export const reservationDetailRoutes: FastifyPluginAsync = async (app) => {
         ? await app.db.select().from(masterItems).where(inArray(masterItems.id, methodIds))
         : [];
       const methodById = new Map(methods.map((method) => [method.id, method]));
+      const appliedCampaigns = [
+        ...new Map(
+          nights
+            .filter((night) => night.campaignSnapshot)
+            .map((night) => [night.campaignSnapshot!.id, night.campaignSnapshot!]),
+        ).values(),
+      ];
 
       return {
         reservation: record.reservation,
@@ -100,6 +107,7 @@ export const reservationDetailRoutes: FastifyPluginAsync = async (app) => {
           nights: nights.filter((night) => night.reservationRoomId === reservationRoom.id),
           extraBeds: extraBeds.filter((bed) => bed.reservationRoomId === reservationRoom.id),
         })),
+        appliedCampaigns,
         experiences,
         charges: financials.charges,
         payments: financials.payments.map((payment) => ({

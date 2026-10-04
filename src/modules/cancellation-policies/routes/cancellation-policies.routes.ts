@@ -1,6 +1,9 @@
-import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { cancellationPolicies } from "../../../db/schema/cancellation_policies.schema.js";
+import { cancellationPolicyRoomTypes } from "../../../db/schema/cancellation_policy_room_types.schema.js";
+import { cancellationRules } from "../../../db/schema/cancellation_rules.schema.js";
+import { roomTypes } from "../../../db/schema/room_types.schema.js";
 import { databaseErrorCode } from "../../master/master.shared.js";
 import {
   cancellationPolicyValues,
@@ -20,6 +23,7 @@ type ListQuery = {
   search?: string;
   source?: "website" | "phone";
   isActive?: boolean;
+  roomTypeId?: string;
   page?: number;
   limit?: number;
 };
@@ -39,6 +43,7 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
             search: { type: "string", maxLength: 160 },
             source: { type: "string", enum: ["website", "phone"] },
             isActive: { type: "boolean" },
+            roomTypeId: { type: "string", format: "uuid" },
             page: { type: "integer", minimum: 1, default: 1 },
             limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
           },
@@ -46,17 +51,33 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request) => {
-      const { search, source, isActive, page = 1, limit = 20 } = request.query;
+      const { search, source, isActive, roomTypeId, page = 1, limit = 20 } = request.query;
       const filter = and(
-        search?.trim() ? ilike(cancellationPolicies.name, `%${search.trim()}%`) : undefined,
+        search?.trim()
+          ? sql`(
+              ${ilike(cancellationPolicies.name, `%${search.trim()}%`)}
+              or exists (
+                select 1 from ${cancellationPolicyRoomTypes} link
+                join ${roomTypes} room on room.id = link.room_type_id
+                where link.policy_id = ${cancellationPolicies.id}
+                  and room.name ilike ${`%${search.trim()}%`}
+              )
+            )`
+          : undefined,
         source === "website"
           ? eq(cancellationPolicies.appliesWebsite, true)
           : source === "phone"
             ? eq(cancellationPolicies.appliesPhone, true)
             : undefined,
         isActive === undefined ? undefined : eq(cancellationPolicies.isActive, isActive),
+        roomTypeId
+          ? sql`(
+              not exists (select 1 from ${cancellationPolicyRoomTypes} link where link.policy_id = ${cancellationPolicies.id})
+              or exists (select 1 from ${cancellationPolicyRoomTypes} link where link.policy_id = ${cancellationPolicies.id} and link.room_type_id = ${roomTypeId})
+            )`
+          : undefined,
       );
-      const [items, [total]] = await Promise.all([
+      const [items, [total], [counts]] = await Promise.all([
         app.db
           .select()
           .from(cancellationPolicies)
@@ -68,8 +89,40 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
           .select({ count: sql<number>`count(*)::int` })
           .from(cancellationPolicies)
           .where(filter),
+        app.db
+          .select({
+            active: sql<number>`count(*) filter (where ${cancellationPolicies.isActive})::int`,
+            inactive: sql<number>`count(*) filter (where not ${cancellationPolicies.isActive})::int`,
+          })
+          .from(cancellationPolicies),
       ]);
-      return { items, page, limit, total: total.count };
+      const ids = items.map((item) => item.id);
+      const [rules, linkedRooms] = ids.length
+        ? await Promise.all([
+            app.db.select().from(cancellationRules)
+              .where(inArray(cancellationRules.policyId, ids))
+              .orderBy(asc(cancellationRules.sortOrder)),
+            app.db
+              .select({ policyId: cancellationPolicyRoomTypes.policyId, id: roomTypes.id, name: roomTypes.name })
+              .from(cancellationPolicyRoomTypes)
+              .innerJoin(roomTypes, eq(cancellationPolicyRoomTypes.roomTypeId, roomTypes.id))
+              .where(inArray(cancellationPolicyRoomTypes.policyId, ids))
+              .orderBy(asc(roomTypes.name)),
+          ])
+        : [[], []];
+      return {
+        items: items.map((item) => ({
+          ...item,
+          rules: rules.filter((rule) => rule.policyId === item.id),
+          roomTypes: linkedRooms
+            .filter((room) => room.policyId === item.id)
+            .map(({ id, name }) => ({ id, name })),
+        })),
+        page,
+        limit,
+        total: total.count,
+        counts,
+      };
     },
   );
 

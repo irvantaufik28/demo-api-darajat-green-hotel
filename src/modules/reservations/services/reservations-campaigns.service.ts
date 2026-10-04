@@ -4,6 +4,7 @@ import { campaignBlackoutDates } from "../../../db/schema/campaign_blackout_date
 import { campaignDays } from "../../../db/schema/campaign_days.schema.js";
 import { campaignRoomTypes } from "../../../db/schema/campaign_room_types.schema.js";
 import { campaigns } from "../../../db/schema/campaigns.schema.js";
+import type { ReservationCampaignSnapshot } from "../../../db/schema/reservation_room_nights.schema.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type QueryDatabase = Database | Transaction;
@@ -16,6 +17,7 @@ export type PricedRoomNight = {
   discountAmount: number;
   finalPrice: number;
   campaignId: string | null;
+  campaignSnapshot: ReservationCampaignSnapshot | null;
 };
 
 export class InvalidPromoCodeError extends Error {}
@@ -140,6 +142,21 @@ export async function priceRoomNights(
       discountAmount,
       finalPrice: row.basePrice - discountAmount,
       campaignId: campaign?.id ?? null,
+      campaignSnapshot: campaign
+        ? {
+            id: campaign.id,
+            name: campaign.name,
+            promoCode: campaign.promoCode,
+            channel: campaign.channel,
+            discountType: campaign.discountType,
+            discountValue: campaign.discountValue,
+            priority: campaign.priority,
+            bookingStart: campaign.bookingStart,
+            bookingEnd: campaign.bookingEnd,
+            stayStart: campaign.stayStart,
+            stayEnd: campaign.stayEnd,
+          }
+        : null,
     };
   });
 

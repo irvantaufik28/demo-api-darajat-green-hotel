@@ -271,4 +271,32 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       return { campaign };
     },
   );
+
+  app.delete<{ Params: IdParams }>(
+    "/:id",
+    {
+      preHandler: app.requirePermission("campaigns.disable"),
+      schema: { params: campaignParamsSchema },
+    },
+    async (request, reply) => {
+      const result = await app.db.transaction(async (tx) => {
+        await lockCampaignPriority(tx);
+        const [campaign] = await tx
+          .select({ channel: campaigns.channel })
+          .from(campaigns)
+          .where(eq(campaigns.id, request.params.id))
+          .limit(1);
+        if (!campaign) return "not_found";
+
+        await tx.delete(campaigns).where(eq(campaigns.id, request.params.id));
+        await normalizeCampaignPriorities(tx, campaign.channel);
+        return "deleted";
+      });
+
+      if (result === "not_found") {
+        return reply.code(404).send(errorBody("NOT_FOUND", "Campaign not found"));
+      }
+      return reply.code(204).send();
+    },
+  );
 };

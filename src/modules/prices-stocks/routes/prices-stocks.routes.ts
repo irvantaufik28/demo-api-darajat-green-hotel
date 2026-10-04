@@ -55,7 +55,7 @@ async function getRoomTypeAndStockLimit(
   app: Parameters<FastifyPluginAsync>[0],
   roomTypeId: string,
 ) {
-  const [[roomType], [stock]] = await Promise.all([
+  const [[roomType], [stock], [physicalRooms]] = await Promise.all([
     app.db
       .select({
         id: roomTypes.id,
@@ -70,8 +70,12 @@ async function getRoomTypeAndStockLimit(
       .select({ total: count() })
       .from(roomUnits)
       .where(and(eq(roomUnits.roomTypeId, roomTypeId), eq(roomUnits.isActive, true))),
+    app.db
+      .select({ total: count() })
+      .from(roomUnits)
+      .where(eq(roomUnits.roomTypeId, roomTypeId)),
   ]);
-  return { roomType, stockLimit: stock.total };
+  return { roomType, stockLimit: stock.total, totalRoomCount: physicalRooms.total };
 }
 
 function changedFields(change: InventoryChange): string[] {
@@ -95,7 +99,7 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
           .code(400)
           .send(errorBody("INVALID_DATE_RANGE", "Use valid dates in a range of at most 366 days"));
       }
-      const { roomType, stockLimit } = await getRoomTypeAndStockLimit(app, roomTypeId);
+      const { roomType, stockLimit, totalRoomCount } = await getRoomTypeAndStockLimit(app, roomTypeId);
       if (!roomType) return reply.code(404).send(errorBody("NOT_FOUND", "Room type not found"));
 
       const visibleDates = dates.slice((page - 1) * limit, page * limit);
@@ -191,6 +195,7 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
       });
       return {
         roomType,
+        totalRoomCount,
         stockLimit,
         operationalRoomCount: operationalRooms.total,
         campaignPreviewBookingDate: bookingDate,

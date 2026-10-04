@@ -889,7 +889,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                 basePrice: night.basePrice,
                 discountAmount: night.discountAmount,
                 finalPrice: night.finalPrice,
-                campaignId: night.campaignId,
+                campaignSnapshot: night.campaignSnapshot,
               })),
             );
             await tx.insert(reservationCharges).values({
