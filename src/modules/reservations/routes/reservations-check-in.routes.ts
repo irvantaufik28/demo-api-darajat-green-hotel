@@ -10,12 +10,14 @@ import { recordReservationEvent } from "../services/reservation-events.service.j
 import { readReservationFinancials } from "../services/reservation-financials.service.js";
 import { getCheckInWarning } from "../reservation-status.js";
 import { bookingDateJakarta } from "../services/reservations-campaigns.service.js";
+import { addEarlyCheckInCharge, EarlyCheckInError, getEarlyCheckInContext, type EarlyCheckInInput } from "../services/reservation-early-check-in.service.js";
 
 type CheckInParams = { id: string };
 type CheckInBody = {
   acknowledgeOutstanding?: boolean;
   rooms?: { reservationRoomId: string; roomUnitId: string }[];
   deposit?: { amount: number; methodId: string; notes?: string };
+  earlyCheckIn?: EarlyCheckInInput;
 };
 
 const paramsSchema = {
@@ -49,6 +51,17 @@ const bodySchema = {
         notes: { type: "string", maxLength: 1000 },
       },
     },
+    earlyCheckIn: {
+      type: "object",
+      additionalProperties: false,
+      required: ["acknowledged", "chargeAmount", "paymentTiming"],
+      properties: {
+        acknowledged: { type: "boolean" },
+        chargeAmount: { type: "integer", minimum: 0, maximum: 9007199254740991 },
+        paymentTiming: { type: "string", enum: ["now", "later"] },
+        paymentMethodId: uuidSchema,
+      },
+    },
   },
 } as const;
 
@@ -63,6 +76,15 @@ class CheckInInputError extends Error {
 }
 
 export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
+  app.get<{ Querystring: { checkInDate: string } }>(
+    "/check-in-context",
+    {
+      preHandler: app.requirePermission("reservations.check_in"),
+      schema: { querystring: { type: "object", additionalProperties: false, required: ["checkInDate"], properties: { checkInDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" } } } },
+    },
+    async (request) => getEarlyCheckInContext(app.db, request.query.checkInDate),
+  );
+
   app.post<{ Params: CheckInParams; Body: CheckInBody }>(
     "/:id/check-in",
     {
@@ -97,6 +119,14 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
               "CHECK_IN_DATE_NOT_TODAY",
               "Check-in is only available on or after the check-in date",
             );
+          }
+          const earlyContext = await getEarlyCheckInContext(tx, reservation.checkInDate);
+          const early = request.body?.earlyCheckIn;
+          if (earlyContext.required && early?.acknowledged !== true) {
+            throw new CheckInInputError("EARLY_CHECK_IN_CONFIRMATION_REQUIRED", "Confirm early check-in before the standard check-in time");
+          }
+          if (earlyContext.required && early && early.paymentTiming === "now" && early.chargeAmount > 0 && !early.paymentMethodId) {
+            throw new CheckInInputError("INVALID_EARLY_CHECK_IN", "Early check-in details or payment method are invalid", 400);
           }
           if (warning !== "none" && request.body?.acknowledgeOutstanding !== true) {
             throw new CheckInInputError(
@@ -202,8 +232,8 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
             );
           }
 
-          const { remainingBalance } = await readReservationFinancials(tx, reservation.id);
-          if (remainingBalance > 0 && request.body?.acknowledgeOutstanding !== true) {
+          const { remainingBalance: originalBalance } = await readReservationFinancials(tx, reservation.id);
+          if (originalBalance > 0 && request.body?.acknowledgeOutstanding !== true) {
             throw new CheckInInputError(
               "OUTSTANDING_CONFIRMATION_REQUIRED",
               "Confirm the outstanding balance before check-in",
@@ -244,6 +274,19 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
             .where(inArray(roomUnits.id, unitIds));
 
           const checkedInAt = new Date();
+          const earlyCharge = earlyContext.required && early
+            ? await addEarlyCheckInCharge(tx, {
+                reservationId: reservation.id,
+                checkInDate: reservation.checkInDate,
+                actorUserId: request.authUser!.id,
+                earlyCheckIn: early,
+              })
+            : null;
+          const financials = await readReservationFinancials(tx, reservation.id);
+          const remainingBalance = financials.remainingBalance;
+          const paymentStatus = financials.netPaidAmount >= financials.bookingTotal
+            ? "paid"
+            : financials.netPaidAmount > 0 ? "partial" : "unpaid";
           const [heldDeposit] = request.body?.deposit
             ? await tx
                 .insert(reservationDeposits)
@@ -255,10 +298,41 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
                 })
                 .returning({ id: reservationDeposits.id })
             : [];
+          if (earlyCharge?.chargeId) {
+            await recordReservationEvent(tx, {
+              reservationId: reservation.id,
+              eventType: "reservation.early_check_in_charged",
+              actorType: "user",
+              actorUserId: request.authUser!.id,
+              occurredAt: checkedInAt,
+              reservationStatusBefore: reservation.reservationStatus,
+              reservationStatusAfter: reservation.reservationStatus,
+              paymentStatusBefore: reservation.paymentStatus,
+              paymentStatusAfter: paymentStatus,
+              referenceId: earlyCharge.chargeId,
+              details: { amount: early!.chargeAmount, paymentTiming: early!.paymentTiming },
+            });
+          }
+          if (earlyCharge?.paymentId) {
+            await recordReservationEvent(tx, {
+              reservationId: reservation.id,
+              eventType: "payment.recorded",
+              actorType: "user",
+              actorUserId: request.authUser!.id,
+              occurredAt: checkedInAt,
+              reservationStatusBefore: reservation.reservationStatus,
+              reservationStatusAfter: reservation.reservationStatus,
+              paymentStatusBefore: reservation.paymentStatus,
+              paymentStatusAfter: paymentStatus,
+              referenceId: earlyCharge.paymentId,
+              details: { amount: early!.chargeAmount, methodId: early!.paymentMethodId, source: "early_check_in" },
+            });
+          }
           await tx
             .update(reservations)
             .set({
               reservationStatus: "checked_in",
+              paymentStatus,
               checkedInAt,
               version: sql`${reservations.version} + 1`,
               updatedAt: checkedInAt,
@@ -288,7 +362,7 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
             reservationStatusBefore: reservation.reservationStatus,
             reservationStatusAfter: "checked_in",
             paymentStatusBefore: reservation.paymentStatus,
-            paymentStatusAfter: reservation.paymentStatus,
+            paymentStatusAfter: paymentStatus,
             details: {
               rooms: finalAssignments.map(({ room, roomUnitId }) => ({
                 reservationRoomId: room.id,
@@ -296,8 +370,16 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
                 roomNumber: unitsById.get(roomUnitId)!.roomNumber,
               })),
               remainingBalance,
-              outstandingAcknowledged: remainingBalance > 0,
+              outstandingAcknowledged: originalBalance > 0,
               depositId: heldDeposit?.id ?? null,
+              earlyCheckIn: earlyContext.required ? {
+                standardCheckInTime: earlyContext.standardCheckInTime,
+                serverTime: earlyContext.serverTime,
+                chargeAmount: early?.chargeAmount ?? 0,
+                paymentTiming: early?.paymentTiming ?? "later",
+                chargeId: earlyCharge?.chargeId ?? null,
+                paymentId: earlyCharge?.paymentId ?? null,
+              } : null,
             },
           });
 
@@ -305,7 +387,7 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
             reservationId: reservation.id,
             bookingCode: reservation.bookingCode,
             reservationStatus: "checked_in" as const,
-            paymentStatus: reservation.paymentStatus,
+            paymentStatus,
             checkedInAt,
             remainingBalance,
             rooms: finalAssignments.map(({ room, roomUnitId }) => ({
@@ -317,6 +399,9 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
         });
         return result;
       } catch (error) {
+        if (error instanceof EarlyCheckInError) {
+          return reply.code(400).send({ error: { code: error.code, message: error.message } });
+        }
         if (error instanceof CheckInInputError) {
           return reply.code(error.statusCode).send({
             error: { code: error.code, message: error.message },

@@ -1,11 +1,12 @@
-import { and, asc, count, desc, eq, gt, ilike, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, ilike, inArray, lt, lte, or, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { guests } from "../../../db/schema/guests.schema.js";
 import { reservationDeposits } from "../../../db/schema/reservation_deposits.schema.js";
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
-import { bookingDateJakarta } from "../services/reservations-campaigns.service.js";
+import { getCheckOutClock } from "../services/reservation-check-out-time.service.js";
+import { resolveReservationOperationalStatus } from "../reservations-operational-status.js";
 
 type InHouseQuery = {
   search?: string;
@@ -27,12 +28,6 @@ const querySchema = {
   },
 } as const;
 
-function operationalStatus(checkOutDate: string, today: string) {
-  if (checkOutDate < today) return { code: "overdue", label: "Overdue" };
-  if (checkOutDate === today) return { code: "due_out", label: "Due Out" };
-  return { code: "in_house", label: "In House" };
-}
-
 export const reservationInHouseRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: InHouseQuery }>(
     "/in-house",
@@ -41,7 +36,8 @@ export const reservationInHouseRoutes: FastifyPluginAsync = async (app) => {
       schema: { querystring: querySchema },
     },
     async (request) => {
-      const today = bookingDateJakarta();
+      const clock = await getCheckOutClock(app.db);
+      const today = clock.serverDate;
       const {
         search,
         operationalStatus: statusFilter,
@@ -66,9 +62,13 @@ export const reservationInHouseRoutes: FastifyPluginAsync = async (app) => {
         statusFilter === "in_house"
           ? gt(reservations.checkOutDate, today)
           : statusFilter === "due_out"
-            ? eq(reservations.checkOutDate, today)
+            ? clock.afterCheckOutTime
+              ? sql`false`
+              : eq(reservations.checkOutDate, today)
             : statusFilter === "overdue"
-              ? lt(reservations.checkOutDate, today)
+              ? clock.afterCheckOutTime
+                ? lte(reservations.checkOutDate, today)
+                : lt(reservations.checkOutDate, today)
               : undefined,
         paymentStatus ? eq(reservations.paymentStatus, paymentStatus) : undefined,
         term
@@ -125,11 +125,11 @@ export const reservationInHouseRoutes: FastifyPluginAsync = async (app) => {
                 Number,
               ),
             dueOut:
-              sql<number>`count(*) filter (where ${reservations.checkOutDate} = ${today})::int`.mapWith(
+              sql<number>`count(*) filter (where ${reservations.checkOutDate} = ${today} and ${!clock.afterCheckOutTime})::int`.mapWith(
                 Number,
               ),
             overdue:
-              sql<number>`count(*) filter (where ${reservations.checkOutDate} < ${today})::int`.mapWith(
+              sql<number>`count(*) filter (where ${reservations.checkOutDate} < ${today} or (${reservations.checkOutDate} = ${today} and ${clock.afterCheckOutTime}))::int`.mapWith(
                 Number,
               ),
           })
@@ -201,7 +201,12 @@ export const reservationInHouseRoutes: FastifyPluginAsync = async (app) => {
           const heldBalance = deposit?.heldBalance ?? 0;
           return {
             ...row,
-            operationalStatus: operationalStatus(row.checkOutDate, today),
+            operationalStatus: resolveReservationOperationalStatus(
+              row.reservationStatus,
+              row.checkInDate,
+              row.checkOutDate,
+              clock,
+            ),
             rooms,
             roomCount: rooms.length,
             roomSummary: [...roomTypeCounts]

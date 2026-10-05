@@ -105,32 +105,24 @@ export async function readRoomAvailability(
   // 2. GET CAPACITY MATCH
   // ======================================================
 
-  const capacities = guests
-    ? await db
-        .select({
-          roomTypeId: roomTypeCapacityPatterns.roomTypeId,
-          extraBeds: roomTypeCapacityPatterns.extraBeds,
-        })
-        .from(roomTypeCapacityPatterns)
-        .innerJoin(
-          capacityPatterns,
-          eq(
-            roomTypeCapacityPatterns.capacityPatternId,
-            capacityPatterns.id,
-          ),
-        )
-        .where(
-          and(
-            inArray(
-              roomTypeCapacityPatterns.roomTypeId,
-              roomTypeIds,
-            ),
-            eq(capacityPatterns.isActive, true),
-            eq(capacityPatterns.adults, guests.adults),
-            eq(capacityPatterns.children, guests.children),
-          ),
-        )
-    : [];
+  const capacities = await db
+    .select({
+      roomTypeId: roomTypeCapacityPatterns.roomTypeId,
+      adults: capacityPatterns.adults,
+      children: capacityPatterns.children,
+      extraBeds: roomTypeCapacityPatterns.extraBeds,
+    })
+    .from(roomTypeCapacityPatterns)
+    .innerJoin(
+      capacityPatterns,
+      eq(roomTypeCapacityPatterns.capacityPatternId, capacityPatterns.id),
+    )
+    .where(
+      and(
+        inArray(roomTypeCapacityPatterns.roomTypeId, roomTypeIds),
+        eq(capacityPatterns.isActive, true),
+      ),
+    );
 
   // ======================================================
   // 3. KEEP CAPACITY MISMATCHES VISIBLE IN THE RESPONSE
@@ -279,17 +271,20 @@ export async function readRoomAvailability(
   // ======================================================
 
   return types.map((type) => {
+    const roomCapacityPatterns = capacities
+      .filter(
+        (capacity) =>
+          capacity.roomTypeId === type.id &&
+          capacity.extraBeds <= type.maxExtraBeds &&
+          (capacity.extraBeds === 0 || type.extraBedEnabled),
+      )
+      .map(({ adults, children, extraBeds }) => ({ adults, children, extraBeds }));
     const matchingBeds = guests
-      ? capacities
+      ? roomCapacityPatterns
           .filter(
             (capacity) =>
-              capacity.roomTypeId === type.id &&
-              capacity.extraBeds <=
-                type.maxExtraBeds &&
-              (
-                capacity.extraBeds === 0 ||
-                type.extraBedEnabled
-              ),
+              capacity.adults === guests.adults &&
+              capacity.children === guests.children,
           )
           .map(
             (capacity) =>
@@ -355,6 +350,9 @@ export async function readRoomAvailability(
     let availableRooms = physicalRooms;
 
     const reasons = new Set<string>();
+    if (roomCapacityPatterns.length === 0) {
+      reasons.add("capacity_not_configured");
+    }
     if (guests && requiredExtraBeds === null) {
       reasons.add("capacity_mismatch");
     }
@@ -443,6 +441,7 @@ export async function readRoomAvailability(
 
     return {
       roomType: type,
+      capacityPatterns: roomCapacityPatterns,
 
       physicalRooms,
 

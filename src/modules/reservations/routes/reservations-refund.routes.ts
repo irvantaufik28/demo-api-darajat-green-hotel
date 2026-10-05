@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { paymentRefunds } from "../../../db/schema/payment_refunds.schema.js";
@@ -8,6 +9,8 @@ import { uuidSchema } from "../../master/master.shared.js";
 import { calculateCancellationSettlement } from "../services/reservation-cancellation-settlement.service.js";
 import { recordReservationEvent } from "../services/reservation-events.service.js";
 import { readReservationFinancials } from "../services/reservation-financials.service.js";
+import { getNoRefundDecision } from "../services/reservation-no-refund.service.js";
+import { paymentStatusAfterCancellationRefund } from "../services/reservation-refund-status.service.js";
 
 type RefundParams = { id: string };
 type RefundBody = {
@@ -72,9 +75,10 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           error: { code: "REFUND_NOT_ALLOWED", message: "Reservation must be cancelled first" },
         });
       }
-      const [settlement, financials] = await Promise.all([
+      const [settlement, financials, noRefundDecision] = await Promise.all([
         calculateCancellationSettlement(app.db, reservation),
         readReservationFinancials(app.db, reservation.id),
+        getNoRefundDecision(app.db, reservation.id),
       ]);
       const methodIds = [...new Set(financials.payments.map((payment) => payment.methodId))];
       const methods = methodIds.length
@@ -89,6 +93,7 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
         bookingCode: reservation.bookingCode,
         source: reservation.source,
         hasCancellationPolicySnapshot: reservation.cancellationPolicySnapshot !== null,
+        noRefundDecision,
         settlement,
         grossPaidAmount: financials.grossPaidAmount,
         refundedAmount: financials.refundedAmount,
@@ -169,6 +174,12 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
               "Reservation must be cancelled before recording a cancellation refund",
             );
           }
+          if (await getNoRefundDecision(tx, reservation.id)) {
+            throw new RefundInputError(
+              "REFUND_ALREADY_SETTLED",
+              "This reservation was closed without a refund",
+            );
+          }
 
           const [payment] = await tx
             .select()
@@ -232,9 +243,12 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           }
           if (
             !ignoreCancellationPolicy &&
-            settlement.calculationStatus === "calculated" &&
             request.body.amount >
-              (settlement.amounts.estimatedRefundAmount ?? 0) - financials.pendingRefundAmount
+              Math.max(
+                0,
+                (settlement.amounts.maximumRefundWithoutOverride ?? 0) -
+                  financials.pendingRefundAmount,
+              )
           ) {
             throw new RefundInputError(
               "REFUND_EXCEEDS_SETTLEMENT",
@@ -269,12 +283,11 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
             .where(eq(payments.id, payment.id));
 
           const netPaidAmount = financials.netPaidAmount - refund.amount;
-          const reservationPaymentStatus =
-            financials.grossPaidAmount > 0 && netPaidAmount === 0
-              ? "refunded"
-              : netPaidAmount < financials.bookingTotal
-                ? "partial"
-                : "paid";
+          const reservationPaymentStatus = paymentStatusAfterCancellationRefund(
+            financials.grossPaidAmount,
+            netPaidAmount,
+            financials.bookingTotal,
+          );
           await tx
             .update(reservations)
             .set({
@@ -325,6 +338,309 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           return reply.code(error.statusCode).send({
             error: { code: error.code, message: error.message },
           });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{ Params: RefundParams; Body: { reason: string } }>(
+    "/:id/refunds/no-refund",
+    {
+      preHandler: app.requirePermission("payments.refund"),
+      schema: {
+        params: paramsSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["reason"],
+          properties: { reason: { type: "string", minLength: 1, maxLength: 2000 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const reason = request.body.reason.trim();
+      if (!reason) {
+        return reply
+          .code(400)
+          .send({ error: { code: "INVALID_REASON", message: "Reason is required" } });
+      }
+      try {
+        const result = await app.db.transaction(async (tx) => {
+          const [reservation] = await tx
+            .select()
+            .from(reservations)
+            .where(eq(reservations.id, request.params.id))
+            .for("update")
+            .limit(1);
+          if (!reservation)
+            throw new RefundInputError("RESERVATION_NOT_FOUND", "Reservation not found", 404);
+          if (reservation.reservationStatus !== "cancelled") {
+            throw new RefundInputError("REFUND_NOT_ALLOWED", "Reservation must be cancelled first");
+          }
+          if (await getNoRefundDecision(tx, reservation.id)) {
+            throw new RefundInputError(
+              "NO_REFUND_ALREADY_RECORDED",
+              "No Refund has already been recorded",
+            );
+          }
+          const [settlement, financials] = await Promise.all([
+            calculateCancellationSettlement(tx, reservation),
+            readReservationFinancials(tx, reservation.id),
+          ]);
+          if (financials.pendingRefundAmount > 0 || financials.refundedAmount > 0) {
+            throw new RefundInputError(
+              "REFUND_IN_PROGRESS",
+              "Resolve existing refunds before recording No Refund",
+            );
+          }
+          if (financials.grossPaidAmount <= 0) {
+            throw new RefundInputError(
+              "NO_PAYMENT_TO_REFUND",
+              "No payment was received for this reservation",
+            );
+          }
+          if ((settlement.amounts.maximumRefundWithoutOverride ?? 0) > 0) {
+            throw new RefundInputError(
+              "REFUND_AVAILABLE",
+              "A refund is due under the cancellation policy",
+            );
+          }
+          const occurredAt = new Date();
+          await recordReservationEvent(tx, {
+            reservationId: reservation.id,
+            eventType: "payment.no_refund",
+            actorType: "user",
+            actorUserId: request.authUser!.id,
+            occurredAt,
+            reservationStatusBefore: "cancelled",
+            reservationStatusAfter: "cancelled",
+            paymentStatusBefore: reservation.paymentStatus,
+            paymentStatusAfter: reservation.paymentStatus,
+            details: {
+              reason,
+              netPaidAmount: financials.netPaidAmount,
+              cancellationCharge: settlement.amounts.cancellationCharge,
+              calculationStatus: settlement.calculationStatus,
+              reviewReasons: settlement.reviewReasons,
+              cancellationPolicySnapshot: reservation.cancellationPolicySnapshot,
+            },
+          });
+          return {
+            status: "no_refund",
+            reason,
+            occurredAt,
+            paymentStatus: reservation.paymentStatus,
+          };
+        });
+        return reply.code(201).send(result);
+      } catch (error) {
+        if (error instanceof RefundInputError) {
+          return reply
+            .code(error.statusCode)
+            .send({ error: { code: error.code, message: error.message } });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: RefundParams;
+    Body: {
+      expectedAmount: number;
+      reason: string;
+      ignoreCancellationPolicy?: boolean;
+      settlementOverrideReason?: string;
+    };
+  }>(
+    "/:id/refunds/complete-settlement",
+    {
+      preHandler: app.requirePermission("payments.refund"),
+      schema: {
+        params: paramsSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["expectedAmount", "reason"],
+          properties: {
+            expectedAmount: { type: "integer", minimum: 1, maximum: 9007199254740991 },
+            reason: { type: "string", minLength: 1, maxLength: 2000 },
+            ignoreCancellationPolicy: { type: "boolean", default: false },
+            settlementOverrideReason: { type: "string", minLength: 1, maxLength: 2000 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const reason = request.body.reason.trim();
+      const reviewReason = request.body.settlementOverrideReason?.trim();
+      if (!reason) {
+        return reply.code(400).send({
+          error: { code: "INVALID_REFUND_REASON", message: "Refund reason is required" },
+        });
+      }
+
+      try {
+        const result = await app.db.transaction(async (tx) => {
+          const [reservation] = await tx
+            .select()
+            .from(reservations)
+            .where(eq(reservations.id, request.params.id))
+            .for("update")
+            .limit(1);
+          if (!reservation) {
+            throw new RefundInputError("RESERVATION_NOT_FOUND", "Reservation not found", 404);
+          }
+          if (reservation.reservationStatus !== "cancelled") {
+            throw new RefundInputError("REFUND_NOT_ALLOWED", "Reservation must be cancelled first");
+          }
+          if (await getNoRefundDecision(tx, reservation.id)) {
+            throw new RefundInputError(
+              "REFUND_ALREADY_SETTLED",
+              "This reservation was closed without a refund",
+            );
+          }
+
+          const ignorePolicy = request.body.ignoreCancellationPolicy === true;
+          if (ignorePolicy && !reservation.cancellationPolicySnapshot) {
+            throw new RefundInputError(
+              "REFUND_OVERRIDE_NOT_ALLOWED",
+              "No policy is available to override",
+            );
+          }
+          const [settlement, financials] = await Promise.all([
+            calculateCancellationSettlement(tx, reservation),
+            readReservationFinancials(tx, reservation.id),
+          ]);
+          if (financials.pendingRefundAmount > 0) {
+            throw new RefundInputError(
+              "REFUND_ALREADY_PENDING",
+              "Complete or fail pending refunds first",
+            );
+          }
+          if (
+            (ignorePolicy || settlement.calculationStatus === "manual_review_required") &&
+            !reviewReason
+          ) {
+            throw new RefundInputError(
+              "SETTLEMENT_REVIEW_REQUIRED",
+              "Settlement review reason is required",
+            );
+          }
+          if (!ignorePolicy && settlement.amounts.maximumRefundWithoutOverride === null) {
+            throw new RefundInputError(
+              "SETTLEMENT_REVIEW_REQUIRED",
+              "Cancellation refund cannot be calculated from the saved policy",
+            );
+          }
+
+          const amount = ignorePolicy
+            ? financials.netPaidAmount
+            : settlement.amounts.maximumRefundWithoutOverride!;
+          if (amount <= 0) {
+            throw new RefundInputError(
+              "REFUND_NOT_AVAILABLE",
+              "No refund remains for this reservation",
+            );
+          }
+          if (request.body.expectedAmount !== amount) {
+            throw new RefundInputError(
+              "REFUND_AMOUNT_CHANGED",
+              "Refund amount changed. Refresh and review the calculation",
+            );
+          }
+
+          const processedAt = new Date();
+          const refundablePayments = financials.payments
+            .filter((payment) => ["succeeded", "partially_refunded"].includes(payment.status))
+            .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+          let remaining = amount;
+          const completedRefunds = [];
+
+          for (const payment of refundablePayments) {
+            if (remaining === 0) break;
+            const refundedForPayment = financials.refunds
+              .filter((refund) => refund.paymentId === payment.id && refund.status === "succeeded")
+              .reduce((sum, refund) => sum + refund.amount, 0);
+            const available = payment.amount - refundedForPayment;
+            const part = Math.min(remaining, available);
+            if (part <= 0) continue;
+            const [refund] = await tx
+              .insert(paymentRefunds)
+              .values({
+                paymentId: payment.id,
+                amount: part,
+                reason,
+                status: "succeeded",
+                providerReference: `MANUAL-${randomUUID()}`,
+                processedByUserId: request.authUser!.id,
+                processedAt,
+              })
+              .returning();
+            await tx
+              .update(payments)
+              .set({
+                status:
+                  refundedForPayment + part === payment.amount ? "refunded" : "partially_refunded",
+                version: sql`${payments.version} + 1`,
+                updatedAt: processedAt,
+              })
+              .where(eq(payments.id, payment.id));
+            completedRefunds.push(refund);
+            remaining -= part;
+          }
+          if (remaining !== 0) {
+            throw new RefundInputError(
+              "REFUND_AMOUNT_EXCEEDED",
+              "Refund exceeds the available payments",
+            );
+          }
+
+          const netPaidAmount = financials.netPaidAmount - amount;
+          const reservationPaymentStatus = paymentStatusAfterCancellationRefund(
+            financials.grossPaidAmount,
+            netPaidAmount,
+            financials.bookingTotal,
+          );
+          await tx
+            .update(reservations)
+            .set({
+              paymentStatus: reservationPaymentStatus,
+              version: sql`${reservations.version} + 1`,
+              updatedAt: processedAt,
+            })
+            .where(eq(reservations.id, reservation.id));
+          await recordReservationEvent(tx, {
+            reservationId: reservation.id,
+            eventType: "payment.refunded",
+            actorType: "user",
+            actorUserId: request.authUser!.id,
+            occurredAt: processedAt,
+            reservationStatusBefore: "cancelled",
+            reservationStatusAfter: "cancelled",
+            paymentStatusBefore: reservation.paymentStatus,
+            paymentStatusAfter: reservationPaymentStatus,
+            referenceId: completedRefunds[0].id,
+            details: {
+              amount,
+              refundIds: completedRefunds.map((refund) => refund.id),
+              reason,
+              cancellationPolicyOverridden: ignorePolicy,
+              settlementOverrideReason: reviewReason ?? null,
+              cancellationPolicySnapshot: reservation.cancellationPolicySnapshot,
+              cancellationCharge: settlement.amounts.cancellationCharge,
+              netPaidAmount,
+            },
+          });
+          return { amount, refunds: completedRefunds, reservationPaymentStatus, netPaidAmount };
+        });
+        return reply.code(201).send(result);
+      } catch (error) {
+        if (error instanceof RefundInputError) {
+          return reply
+            .code(error.statusCode)
+            .send({ error: { code: error.code, message: error.message } });
         }
         throw error;
       }

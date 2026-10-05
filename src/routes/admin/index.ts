@@ -8,6 +8,7 @@ import { cancellationPolicyRoutes } from "../../modules/cancellation-policies/in
 import { campaignRoutes } from "../../modules/campaigns/index.js";
 import { experienceRoutes } from "../../modules/experiences/index.js";
 import { guestRoutes } from "../../modules/guests/index.js";
+import { reservationSettingsRoutes } from "../../modules/settings/index.js";
 import {
   paymentListRoutes,
   paymentTransactionRoutes,
@@ -26,6 +27,9 @@ import {
   reservationConfirmRoutes,
   reservationCheckInRoutes,
   reservationCheckOutRoutes,
+  reservationExtendStayRoutes,
+  reservationRoomOperationRoutes,
+  reservationExperienceBillRoutes,
   reservationCancelRoutes,
   reservationCancellationSettlementRoutes,
   reservationRefundRoutes,
@@ -43,6 +47,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(campaignRoutes, { prefix: "/campaigns" });
   await app.register(experienceRoutes, { prefix: "/experiences" });
   await app.register(guestRoutes, { prefix: "/guests" });
+  await app.register(reservationSettingsRoutes, { prefix: "/settings" });
   await app.register(paymentListRoutes, { prefix: "/payments" });
   await app.register(paymentTransactionRoutes, { prefix: "/payments" });
   await app.register(paymentRefundListRoutes, { prefix: "/payments" });
@@ -58,6 +63,9 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(reservationConfirmRoutes, { prefix: "/reservations" });
   await app.register(reservationCheckInRoutes, { prefix: "/reservations" });
   await app.register(reservationCheckOutRoutes, { prefix: "/reservations" });
+  await app.register(reservationExtendStayRoutes, { prefix: "/reservations" });
+  await app.register(reservationRoomOperationRoutes, { prefix: "/reservations" });
+  await app.register(reservationExperienceBillRoutes, { prefix: "/reservations" });
   await app.register(reservationCancelRoutes, { prefix: "/reservations" });
   await app.register(reservationCancellationSettlementRoutes, { prefix: "/reservations" });
   await app.register(reservationRefundRoutes, { prefix: "/reservations" });

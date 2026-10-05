@@ -9,6 +9,9 @@ export { reservationPaymentRoutes } from "./routes/reservations-payment.routes.j
 export { reservationConfirmRoutes } from "./routes/reservations-confirm.routes.js";
 export { reservationCheckInRoutes } from "./routes/reservations-check-in.routes.js";
 export { reservationCheckOutRoutes } from "./routes/reservations-check-out.routes.js";
+export { reservationExtendStayRoutes } from "./routes/reservations-extend-stay.routes.js";
+export { reservationRoomOperationRoutes } from "./routes/reservations-room-operations.routes.js";
+export { reservationExperienceBillRoutes } from "./routes/reservations-experience-bill.routes.js";
 export { reservationCancelRoutes } from "./routes/reservations-cancel.routes.js";
 export { reservationCancellationSettlementRoutes } from "./routes/reservations-cancellation-settlement.routes.js";
 export { reservationRefundRoutes } from "./routes/reservations-refund.routes.js";

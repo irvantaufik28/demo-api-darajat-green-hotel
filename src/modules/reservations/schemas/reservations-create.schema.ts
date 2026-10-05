@@ -1,8 +1,10 @@
 import { uuidSchema } from "../../master/master.shared.js";
+import type { EarlyCheckInInput } from "../services/reservation-early-check-in.service.js";
 
 export type ReservationRoomInput = {
   roomTypeId: string;
   roomUnitId?: string;
+  cancellationPolicyId?: string | null;
   otaRatePerNight?: number;
   adults: number;
   children: number;
@@ -20,10 +22,13 @@ export type CreateReservationBody = {
   guest?: { fullName: string; phone?: string | null; email?: string | null };
   checkInDate: string;
   checkOutDate: string;
+  totalAdults?: number;
+  totalChildren?: number;
   rooms: ReservationRoomInput[];
   confirm: boolean;
   checkIn?: boolean;
   acknowledgeOutstanding?: boolean;
+  earlyCheckIn?: EarlyCheckInInput;
   promoCode?: string | null;
   cancellationPolicyId?: string | null;
   specialRequests?: string | null;
@@ -34,11 +39,13 @@ export type CreateReservationBody = {
 };
 
 export type ReservationQuoteBody = {
-  source: "walk_in" | "phone";
+  source: "walk_in" | "phone" | "ota";
   checkInDate: string;
   checkOutDate: string;
+  totalAdults?: number;
+  totalChildren?: number;
   promoCode?: string | null;
-  rooms: Omit<ReservationRoomInput, "otaRatePerNight">[];
+  rooms: ReservationRoomInput[];
   experiences?: { variantId: string; quantity: number; serviceDate?: string | null }[];
   paymentAmount?: number;
   depositAmount?: number;
@@ -65,9 +72,11 @@ export const reservationQuoteBodySchema = {
   additionalProperties: false,
   required: ["source", "checkInDate", "checkOutDate", "rooms"],
   properties: {
-    source: { type: "string", enum: ["walk_in", "phone"] },
+    source: { type: "string", enum: ["walk_in", "phone", "ota"] },
     checkInDate: stayDateSchema,
     checkOutDate: stayDateSchema,
+    totalAdults: { type: "integer", minimum: 1, maximum: 32767 },
+    totalChildren: { type: "integer", minimum: 0, maximum: 32767 },
     promoCode: {
       anyOf: [{ type: "string", maxLength: 80, pattern: "^[A-Za-z0-9_-]*$" }, { type: "null" }],
     },
@@ -82,6 +91,7 @@ export const reservationQuoteBodySchema = {
         properties: {
           roomTypeId: uuidSchema,
           roomUnitId: uuidSchema,
+          otaRatePerNight: { type: "integer", minimum: 1, maximum: 9007199254740991 },
           adults: { type: "integer", minimum: 0, maximum: 32767 },
           children: { type: "integer", minimum: 0, maximum: 32767 },
           extraBeds: { type: "integer", minimum: 0, maximum: 32767 },
@@ -131,6 +141,8 @@ export const createReservationBodySchema = {
     },
     checkInDate: stayDateSchema,
     checkOutDate: stayDateSchema,
+    totalAdults: { type: "integer", minimum: 1, maximum: 32767 },
+    totalChildren: { type: "integer", minimum: 0, maximum: 32767 },
     rooms: {
       type: "array",
       minItems: 1,
@@ -143,6 +155,7 @@ export const createReservationBodySchema = {
           roomTypeId: uuidSchema,
           roomUnitId: uuidSchema,
           otaRatePerNight: { type: "integer", minimum: 1, maximum: 9007199254740991 },
+          cancellationPolicyId: { anyOf: [uuidSchema, { type: "null" }] },
           adults: { type: "integer", minimum: 0, maximum: 32767 },
           children: { type: "integer", minimum: 0, maximum: 32767 },
           extraBeds: { type: "integer", minimum: 0, maximum: 32767 },
@@ -154,6 +167,17 @@ export const createReservationBodySchema = {
     confirm: { type: "boolean" },
     checkIn: { type: "boolean" },
     acknowledgeOutstanding: { type: "boolean" },
+    earlyCheckIn: {
+      type: "object",
+      additionalProperties: false,
+      required: ["acknowledged", "chargeAmount", "paymentTiming"],
+      properties: {
+        acknowledged: { type: "boolean" },
+        chargeAmount: { type: "integer", minimum: 0, maximum: 9007199254740991 },
+        paymentTiming: { type: "string", enum: ["now", "later"] },
+        paymentMethodId: uuidSchema,
+      },
+    },
     promoCode: {
       anyOf: [{ type: "string", maxLength: 80, pattern: "^[A-Za-z0-9_-]*$" }, { type: "null" }],
     },

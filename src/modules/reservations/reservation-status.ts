@@ -1,4 +1,5 @@
 import { reservationPaymentStatusEnum, reservationStatusEnum } from "../../db/schema/status.enums.js";
+import type { CheckOutClock } from "./services/reservation-check-out-time.service.js";
 
 export type ReservationStatus = (typeof reservationStatusEnum.enumValues)[number];
 export type ReservationPaymentStatus = (typeof reservationPaymentStatusEnum.enumValues)[number];
@@ -36,7 +37,7 @@ export function deriveOperationalStatus(
     checkInDate: string;
     checkOutDate: string;
   },
-  today: string,
+  clock: CheckOutClock,
 ): OperationalStatus {
   switch (reservation.reservationStatus) {
     case "cancelled":
@@ -46,16 +47,21 @@ export function deriveOperationalStatus(
     case "checked_out":
       return "checked_out";
     case "checked_in":
-      return reservation.checkOutDate < today
-        ? "overdue"
-        : reservation.checkOutDate === today
-          ? "due_out"
-          : "in_house";
+      return deriveCheckedInOperationalStatus(reservation.checkOutDate, clock);
     case "confirmed":
-      return reservation.checkInDate > today ? "upcoming" : "ready_to_check_in";
+      return reservation.checkInDate > clock.serverDate ? "upcoming" : "ready_to_check_in";
     case "pending":
       return "awaiting_confirmation";
   }
+}
+
+export function deriveCheckedInOperationalStatus(
+  checkOutDate: string,
+  clock: CheckOutClock,
+): "in_house" | "due_out" | "overdue" {
+  if (checkOutDate > clock.serverDate) return "in_house";
+  if (checkOutDate < clock.serverDate || clock.afterCheckOutTime) return "overdue";
+  return "due_out";
 }
 
 export function getCheckInWarning(

@@ -1,4 +1,6 @@
 import type { reservations } from "../../db/schema/reservations.schema.js";
+import { deriveCheckedInOperationalStatus } from "./reservation-status.js";
+import type { CheckOutClock } from "./services/reservation-check-out-time.service.js";
 
 type ReservationStatus = (typeof reservations.$inferSelect)["reservationStatus"];
 
@@ -13,8 +15,9 @@ export function resolveReservationOperationalStatus(
   reservationStatus: ReservationStatus,
   checkInDate: string,
   checkOutDate: string,
-  today: string,
+  clock: CheckOutClock,
 ): ReservationOperationalStatus {
+  const today = clock.serverDate;
   if (reservationStatus === "pending") {
     return {
       code: "awaiting_confirmation",
@@ -38,14 +41,15 @@ export function resolveReservationOperationalStatus(
   }
 
   if (reservationStatus === "checked_in") {
-    if (checkOutDate > today) {
+    const status = deriveCheckedInOperationalStatus(checkOutDate, clock);
+    if (status === "in_house") {
       return {
         code: "in_house",
         label: "In House",
         description: "Tamu sedang menginap dan belum masuk hari checkout.",
       };
     }
-    if (checkOutDate === today) {
+    if (status === "due_out") {
       return {
         code: "due_out",
         label: "Due Out",
@@ -57,9 +61,15 @@ export function resolveReservationOperationalStatus(
       (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${checkOutDate}T00:00:00Z`)) /
         86_400_000,
     );
+    const minutes = clock.minutesPastCheckOutTime;
+    const sameDayLabel = minutes < 1
+      ? "Overdue · <1m"
+      : `Overdue · ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
     return {
       code: "overdue",
-      label: `Overdue - ${daysOverdue} ${daysOverdue === 1 ? "Day" : "Days"}`,
+      label: daysOverdue === 0
+        ? sameDayLabel
+        : `Overdue - ${daysOverdue} ${daysOverdue === 1 ? "Day" : "Days"}`,
       description: "Tamu masih checked-in setelah melewati jadwal checkout.",
       daysOverdue,
     };

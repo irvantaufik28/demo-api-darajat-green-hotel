@@ -6,8 +6,8 @@ import { reservationCharges } from "../../../db/schema/reservation_charges.schem
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
-import { bookingDateJakarta } from "../services/reservations-campaigns.service.js";
 import { resolveReservationOperationalStatus } from "../reservations-operational-status.js";
+import { getCheckOutClock } from "../services/reservation-check-out-time.service.js";
 
 type ListQuery = {
   search?: string;
@@ -59,7 +59,8 @@ export const reservationListRoutes: FastifyPluginAsync = async (app) => {
       schema: { querystring: listQuerySchema },
     },
     async (request, reply) => {
-      const today = bookingDateJakarta();
+      const operationalClock = await getCheckOutClock(app.db);
+      const today = operationalClock.serverDate;
       const {
         search,
         source,
@@ -189,7 +190,7 @@ export const reservationListRoutes: FastifyPluginAsync = async (app) => {
             row.reservationStatus,
             row.checkInDate,
             row.checkOutDate,
-            today,
+            operationalClock,
           ),
           rooms: roomsByReservation.get(row.id) ?? [],
           roomCount: roomsByReservation.get(row.id)?.length ?? 0,

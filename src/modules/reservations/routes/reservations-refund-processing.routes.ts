@@ -7,6 +7,8 @@ import { uuidSchema } from "../../master/master.shared.js";
 import { calculateCancellationSettlement } from "../services/reservation-cancellation-settlement.service.js";
 import { recordReservationEvent } from "../services/reservation-events.service.js";
 import { readReservationFinancials } from "../services/reservation-financials.service.js";
+import { getNoRefundDecision } from "../services/reservation-no-refund.service.js";
+import { paymentStatusAfterCancellationRefund } from "../services/reservation-refund-status.service.js";
 
 type Params = { id: string };
 type RefundParams = Params & { refundId: string };
@@ -87,6 +89,12 @@ export const reservationRefundProcessingRoutes: FastifyPluginAsync = async (app)
               "Reservation must be cancelled first",
             );
           }
+          if (await getNoRefundDecision(tx, reservation.id)) {
+            throw new RefundOperationError(
+              "REFUND_ALREADY_SETTLED",
+              "This reservation was closed without a refund",
+            );
+          }
           const [payment] = await tx
             .select()
             .from(payments)
@@ -144,9 +152,12 @@ export const reservationRefundProcessingRoutes: FastifyPluginAsync = async (app)
           }
           if (
             !policyOverridden &&
-            settlement.calculationStatus === "calculated" &&
             request.body.amount >
-              (settlement.amounts.estimatedRefundAmount ?? 0) - financials.pendingRefundAmount
+              Math.max(
+                0,
+                (settlement.amounts.maximumRefundWithoutOverride ?? 0) -
+                  financials.pendingRefundAmount,
+              )
           ) {
             throw new RefundOperationError(
               "REFUND_EXCEEDS_SETTLEMENT",
@@ -291,12 +302,11 @@ export const reservationRefundProcessingRoutes: FastifyPluginAsync = async (app)
             })
             .where(eq(payments.id, payment.id));
           const netPaidAmount = financials.netPaidAmount - refund.amount;
-          const reservationPaymentStatus =
-            netPaidAmount === 0
-              ? "refunded"
-              : netPaidAmount < financials.bookingTotal
-                ? "partial"
-                : "paid";
+          const reservationPaymentStatus = paymentStatusAfterCancellationRefund(
+            financials.grossPaidAmount,
+            netPaidAmount,
+            financials.bookingTotal,
+          );
           await tx
             .update(reservations)
             .set({

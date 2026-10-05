@@ -5,11 +5,12 @@ import { reservationDeposits } from "../../../db/schema/reservation_deposits.sch
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
-import { bookingDateJakarta } from "../services/reservations-campaigns.service.js";
+import { getCheckOutClock } from "../services/reservation-check-out-time.service.js";
+import { resolveReservationOperationalStatus } from "../reservations-operational-status.js";
 
 type DeparturesQuery = {
   search?: string;
-  operationalStatus?: "due_out" | "checked_out";
+  operationalStatus?: "due_out" | "overdue" | "checked_out";
   paymentStatus?: "unpaid" | "partial" | "paid";
   page?: number;
   limit?: number;
@@ -20,7 +21,7 @@ const querySchema = {
   additionalProperties: false,
   properties: {
     search: { type: "string", maxLength: 255 },
-    operationalStatus: { type: "string", enum: ["due_out", "checked_out"] },
+    operationalStatus: { type: "string", enum: ["due_out", "overdue", "checked_out"] },
     paymentStatus: { type: "string", enum: ["unpaid", "partial", "paid"] },
     page: { type: "integer", minimum: 1, default: 1 },
     limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
@@ -28,12 +29,6 @@ const querySchema = {
 } as const;
 
 const departureStatuses = ["checked_in", "checked_out"] as const;
-
-function operationalStatus(status: (typeof reservations.$inferSelect)["reservationStatus"]) {
-  if (status === "checked_in") return { code: "due_out", label: "Due Out" };
-  if (status === "checked_out") return { code: "checked_out", label: "Checked Out" };
-  throw new Error(`Unexpected departure status: ${status}`);
-}
 
 export const reservationDeparturesTodayRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: DeparturesQuery }>(
@@ -43,7 +38,8 @@ export const reservationDeparturesTodayRoutes: FastifyPluginAsync = async (app) 
       schema: { querystring: querySchema },
     },
     async (request) => {
-      const today = bookingDateJakarta();
+      const clock = await getCheckOutClock(app.db);
+      const today = clock.serverDate;
       const {
         search,
         operationalStatus: statusFilter,
@@ -55,12 +51,17 @@ export const reservationDeparturesTodayRoutes: FastifyPluginAsync = async (app) 
       const filter = and(
         eq(reservations.checkOutDate, today),
         inArray(reservations.reservationStatus, departureStatuses),
-        statusFilter
-          ? eq(
-              reservations.reservationStatus,
-              statusFilter === "due_out" ? "checked_in" : "checked_out",
-            )
-          : undefined,
+        statusFilter === "checked_out"
+          ? eq(reservations.reservationStatus, "checked_out")
+          : statusFilter === "due_out"
+            ? clock.afterCheckOutTime
+              ? sql`false`
+              : eq(reservations.reservationStatus, "checked_in")
+            : statusFilter === "overdue"
+              ? clock.afterCheckOutTime
+                ? eq(reservations.reservationStatus, "checked_in")
+                : sql`false`
+              : undefined,
         paymentStatus ? eq(reservations.paymentStatus, paymentStatus) : undefined,
         term
           ? or(
@@ -165,13 +166,15 @@ export const reservationDeparturesTodayRoutes: FastifyPluginAsync = async (app) 
       const depositsByReservation = new Map(
         depositRows.map((deposit) => [deposit.reservationId, deposit]),
       );
-      const dueOut = statusCounts.find((row) => row.reservationStatus === "checked_in")?.total ?? 0;
+      const checkedIn = statusCounts.find((row) => row.reservationStatus === "checked_in")?.total ?? 0;
+      const dueOut = clock.afterCheckOutTime ? 0 : checkedIn;
+      const overdue = clock.afterCheckOutTime ? checkedIn : 0;
       const checkedOut =
         statusCounts.find((row) => row.reservationStatus === "checked_out")?.total ?? 0;
 
       return {
         date: today,
-        summary: { total: dueOut + checkedOut, dueOut, checkedOut },
+        summary: { total: checkedIn + checkedOut, dueOut, overdue, checkedOut },
         items: rows.map((row) => {
           const rooms = roomsByReservation.get(row.id) ?? [];
           const roomTypeCounts = new Map<string, number>();
@@ -182,7 +185,12 @@ export const reservationDeparturesTodayRoutes: FastifyPluginAsync = async (app) 
           const heldBalance = deposit?.heldBalance ?? 0;
           return {
             ...row,
-            operationalStatus: operationalStatus(row.reservationStatus),
+            operationalStatus: resolveReservationOperationalStatus(
+              row.reservationStatus,
+              row.checkInDate,
+              row.checkOutDate,
+              clock,
+            ),
             rooms,
             roomCount: rooms.length,
             roomSummary: [...roomTypeCounts]

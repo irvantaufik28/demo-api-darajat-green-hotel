@@ -9,7 +9,7 @@ import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.schema.js";
 import { roomTypes } from "../../../db/schema/room_types.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
-import { bookingDateJakarta } from "../../reservations/services/reservations-campaigns.service.js";
+import { getCheckOutClock } from "../../reservations/services/reservation-check-out-time.service.js";
 
 const activeStatuses = ["pending", "confirmed", "checked_in"] as const;
 const outstandingStatuses = ["unpaid", "partial"] as const;
@@ -17,22 +17,27 @@ type ActivityType = "Arrival" | "Departure" | "Payment" | "Overdue";
 
 export const dashboardRoutes: FastifyPluginAsync = async (app) => {
   app.get("/", { preHandler: app.requirePermission("dashboard.view") }, async () => {
-    const today = bookingDateJakarta();
+    const clock = await getCheckOutClock(app.db);
+    const today = clock.serverDate;
     const activityConditions = {
       Arrival: and(
         eq(reservations.checkInDate, today),
         eq(reservations.reservationStatus, "confirmed"),
       ),
-      Departure: and(
-        eq(reservations.checkOutDate, today),
-        eq(reservations.reservationStatus, "checked_in"),
-      ),
+      Departure: clock.afterCheckOutTime
+        ? sql`false`
+        : and(
+            eq(reservations.checkOutDate, today),
+            eq(reservations.reservationStatus, "checked_in"),
+          ),
       Payment: and(
         inArray(reservations.reservationStatus, activeStatuses),
         inArray(reservations.paymentStatus, outstandingStatuses),
       ),
       Overdue: and(
-        lt(reservations.checkOutDate, today),
+        clock.afterCheckOutTime
+          ? lte(reservations.checkOutDate, today)
+          : lt(reservations.checkOutDate, today),
         eq(reservations.reservationStatus, "checked_in"),
       ),
     };
@@ -74,7 +79,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
               Number,
             ),
           overdue:
-            sql<number>`count(*) filter (where ${reservations.checkOutDate} < ${today} and ${reservations.reservationStatus} = 'checked_in')::int`.mapWith(
+            sql<number>`count(*) filter (where (${reservations.checkOutDate} < ${today} or (${reservations.checkOutDate} = ${today} and ${clock.afterCheckOutTime})) and ${reservations.reservationStatus} = 'checked_in')::int`.mapWith(
               Number,
             ),
         })

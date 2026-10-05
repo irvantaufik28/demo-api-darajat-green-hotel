@@ -23,8 +23,12 @@ import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.sche
 import { roomTypeCapacityPatterns } from "../../../db/schema/room_type_capacity_patterns.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
 import { recordReservationEvent } from "../services/reservation-events.service.js";
+import { addEarlyCheckInCharge, EarlyCheckInError, getEarlyCheckInContext } from "../services/reservation-early-check-in.service.js";
 import { requestHash } from "../reservation-idempotency.js";
-import { calculateReservationTotal, ReservationTotalError } from "../services/reservation-total.service.js";
+import {
+  calculateReservationTotal,
+  ReservationTotalError,
+} from "../services/reservation-total.service.js";
 import { databaseErrorCode, uuidSchema } from "../../master/master.shared.js";
 import { readRoomAvailability, stayDates } from "../services/reservations-availability.service.js";
 import {
@@ -60,6 +64,22 @@ class ReservationInputError extends Error {
 
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
 const nullable = (value: string | null | undefined) => value?.trim() || null;
+
+function guestAllocationError(input: {
+  rooms: { adults: number; children: number }[];
+  totalAdults?: number;
+  totalChildren?: number;
+}) {
+  if ((input.totalAdults === undefined) !== (input.totalChildren === undefined)) {
+    return errorBody("INVALID_GUEST_COUNT", "Provide both totalAdults and totalChildren");
+  }
+  if (input.totalAdults === undefined) return null;
+  const adults = input.rooms.reduce((sum, room) => sum + room.adults, 0);
+  const children = input.rooms.reduce((sum, room) => sum + room.children, 0);
+  return adults === input.totalAdults && children === input.totalChildren
+    ? null
+    : errorBody("GUEST_ALLOCATION_MISMATCH", `Room allocation has ${adults} adult(s) and ${children} child(ren); expected ${input.totalAdults} adult(s) and ${input.totalChildren} child(ren)`);
+}
 
 export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: AvailabilityQuery }>(
@@ -122,9 +142,31 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
           .send(errorBody("INVALID_STAY_DATES", "Use valid dates for a stay of 1 to 366 nights"));
       }
       const roomCount = rooms.length;
+      if (source === "ota" && (promoCode || rooms.some((room) => !room.otaRatePerNight))) {
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "INVALID_OTA_QUOTE",
+              "OTA quote requires a voucher rate for every room and cannot use a promo code",
+            ),
+          );
+      }
+      if (source !== "ota" && rooms.some((room) => room.otaRatePerNight !== undefined)) {
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "INVALID_SOURCE_FIELDS",
+              "Voucher rates are only available for OTA reservations",
+            ),
+          );
+      }
       if (rooms.every((room) => room.adults === 0 && room.children === 0)) {
         return reply.code(400).send(errorBody("INVALID_ROOMS", "At least one guest is required"));
       }
+      const quoteAllocationError = guestAllocationError(request.body);
+      if (quoteAllocationError) return reply.code(400).send(quoteAllocationError);
       const requested = new Map<string, number>();
       for (const room of rooms) {
         requested.set(room.roomTypeId, (requested.get(room.roomTypeId) ?? 0) + 1);
@@ -135,7 +177,10 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
       const byType = new Map(options.map((option) => [option.roomType.id, option]));
       for (const [roomTypeId, quantity] of requested) {
         const option = byType.get(roomTypeId);
-        if (!option || !option.bookable || option.availableRooms < quantity) {
+        if (
+          !option ||
+          (source !== "ota" && (!option.bookable || option.availableRooms < quantity))
+        ) {
           return reply
             .code(409)
             .send(errorBody("ROOM_UNAVAILABLE", `Room type ${roomTypeId} is unavailable`));
@@ -179,7 +224,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             eq(capacityPatterns.isActive, true),
           ),
         );
-      for (const room of rooms) {
+      for (const [roomIndex, room] of rooms.entries()) {
         if (
           !capacities.some(
             (capacity) =>
@@ -191,7 +236,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
         ) {
           return reply
             .code(400)
-            .send(errorBody("INVALID_CAPACITY", "Guest count is not allowed for this room type"));
+            .send(errorBody("INVALID_CAPACITY", `Room ${roomIndex + 1}: guest count or extra beds are not allowed for this room type`));
         }
       }
       try {
@@ -202,11 +247,17 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
           nights: dates.length,
           roomCount,
           rows: rooms.flatMap((room, roomIndex) =>
-            byType.get(room.roomTypeId)!.nightlyRates.map((night) => ({
+            (source === "ota"
+              ? dates.map((stayDate) => ({ stayDate, basePrice: room.otaRatePerNight! }))
+              : byType.get(room.roomTypeId)!.nightlyRates.map((night) => ({
+                  stayDate: night.stayDate,
+                  basePrice: night.basePrice!,
+                }))
+            ).map((night) => ({
               roomIndex,
               roomTypeId: room.roomTypeId,
               stayDate: night.stayDate,
-              basePrice: night.basePrice!,
+              basePrice: night.basePrice,
             })),
           ),
         });
@@ -252,7 +303,8 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               ]),
           ),
         });
-        const paidAmount = request.body.paymentAmount ?? 0;
+        const paidAmount =
+          source === "ota" ? totals.bookingTotal : (request.body.paymentAmount ?? 0);
         if (paidAmount > totals.bookingTotal) {
           return reply
             .code(400)
@@ -325,15 +377,33 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
           );
       }
       if (body.checkIn && body.checkInDate !== bookingDateJakarta()) {
-        return reply.code(400).send(
-          errorBody("CHECK_IN_DATE_NOT_TODAY", "Direct check-in is only available on the check-in date"),
-        );
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "CHECK_IN_DATE_NOT_TODAY",
+              "Direct check-in is only available on the check-in date",
+            ),
+          );
       }
       if (body.source === "walk_in" && body.cancellationPolicyId) {
         return reply
           .code(400)
           .send(
             errorBody("INVALID_POLICY", "Walk-in reservations do not use cancellation policies"),
+          );
+      }
+      if (
+        body.source !== "phone" &&
+        body.rooms.some((room) => room.cancellationPolicyId !== undefined)
+      ) {
+        return reply
+          .code(400)
+          .send(
+            errorBody(
+              "INVALID_POLICY",
+              "Room cancellation policies are only available for Phone reservations",
+            ),
           );
       }
       if (body.source === "ota") {
@@ -379,6 +449,8 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
       if (body.rooms.every((room) => room.adults === 0 && room.children === 0)) {
         return reply.code(400).send(errorBody("INVALID_ROOMS", "At least one guest is required"));
       }
+      const createAllocationError = guestAllocationError(body);
+      if (createAllocationError) return reply.code(400).send(createAllocationError);
       const assignedUnitIds = body.rooms
         .map((room) => room.roomUnitId)
         .filter((id): id is string => Boolean(id));
@@ -561,7 +633,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                 eq(capacityPatterns.isActive, true),
               ),
             );
-          for (const room of body.rooms) {
+          for (const [roomIndex, room] of body.rooms.entries()) {
             const option = availabilityByType.get(room.roomTypeId)!;
             const extraBeds = room.extraBeds ?? 0;
             if (
@@ -570,7 +642,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             ) {
               throw new ReservationInputError(
                 "INVALID_EXTRA_BEDS",
-                "Extra bed is not allowed for this room type",
+                `Room ${roomIndex + 1}: extra bed is not allowed for this room type`,
               );
             }
             if (
@@ -584,7 +656,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             ) {
               throw new ReservationInputError(
                 "INVALID_CAPACITY",
-                "Guest count is not allowed for this room type",
+                `Room ${roomIndex + 1}: guest count or extra beds are not allowed for this room type`,
               );
             }
           }
@@ -707,63 +779,147 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
 
           let cancellationPolicyId: string | null = null;
           let cancellationPolicySnapshot: unknown = null;
+          let roomPolicySnapshots:
+            | {
+                roomIndex: number;
+                roomTypeId: string;
+                policyId: string | null;
+                snapshot: unknown;
+              }[]
+            | null = null;
           if (body.source === "phone") {
-            const selectedPolicyId =
-              body.cancellationPolicyId ??
-              priced.appliedCampaigns.find((campaign) => campaign.cancellationPolicyId)
-                ?.cancellationPolicyId;
-            if (selectedPolicyId) {
-              const [policy] = await tx
-                .select()
-                .from(cancellationPolicies)
-                .where(
-                  and(
-                    eq(cancellationPolicies.id, selectedPolicyId),
-                    eq(cancellationPolicies.isActive, true),
-                    eq(cancellationPolicies.appliesPhone, true),
-                  ),
-                )
-                .limit(1);
-              if (
-                !policy ||
-                (policy.stayStart && policy.stayStart > body.checkInDate) ||
-                (policy.stayEnd && policy.stayEnd < dates[dates.length - 1])
-              ) {
+            if (body.rooms.some((room) => room.cancellationPolicyId !== undefined)) {
+              if (body.cancellationPolicyId) {
                 throw new ReservationInputError(
                   "INVALID_POLICY",
-                  "Phone cancellation policy is unavailable for this stay",
+                  "Choose cancellation policies per room or per reservation",
                 );
               }
-              const [rules, applicableRooms] = await Promise.all([
-                tx
+              const roomPolicies = [];
+              for (const [roomIndex, room] of body.rooms.entries()) {
+                if (!room.cancellationPolicyId) {
+                  roomPolicies.push({
+                    roomIndex,
+                    roomTypeId: room.roomTypeId,
+                    policyId: null,
+                    snapshot: {
+                      name: "100% cancellation charge",
+                      type: "non_refundable",
+                      chargeType: "percentage",
+                      chargeValue: 100,
+                    },
+                  });
+                  continue;
+                }
+                const [policy] = await tx
                   .select()
-                  .from(cancellationRules)
-                  .where(eq(cancellationRules.policyId, policy.id)),
-                tx
-                  .select({ roomTypeId: cancellationPolicyRoomTypes.roomTypeId })
-                  .from(cancellationPolicyRoomTypes)
-                  .where(eq(cancellationPolicyRoomTypes.policyId, policy.id)),
-              ]);
-              if (
-                applicableRooms.length &&
-                roomTypeIds.some(
-                  (id) => !applicableRooms.some((applicable) => applicable.roomTypeId === id),
-                )
-              ) {
-                throw new ReservationInputError(
-                  "INVALID_POLICY",
-                  "Cancellation policy does not apply to all selected rooms",
-                );
+                  .from(cancellationPolicies)
+                  .where(
+                    and(
+                      eq(cancellationPolicies.id, room.cancellationPolicyId),
+                      eq(cancellationPolicies.isActive, true),
+                      eq(cancellationPolicies.appliesPhone, true),
+                    ),
+                  )
+                  .limit(1);
+                if (
+                  !policy ||
+                  (policy.stayStart && policy.stayStart > body.checkInDate) ||
+                  (policy.stayEnd && policy.stayEnd < dates[dates.length - 1])
+                ) {
+                  throw new ReservationInputError(
+                    "INVALID_POLICY",
+                    `Cancellation policy is unavailable for room ${roomIndex + 1}`,
+                  );
+                }
+                const [rules, applicableRooms] = await Promise.all([
+                  tx
+                    .select()
+                    .from(cancellationRules)
+                    .where(eq(cancellationRules.policyId, policy.id)),
+                  tx
+                    .select({ roomTypeId: cancellationPolicyRoomTypes.roomTypeId })
+                    .from(cancellationPolicyRoomTypes)
+                    .where(eq(cancellationPolicyRoomTypes.policyId, policy.id)),
+                ]);
+                if (
+                  applicableRooms.length &&
+                  !applicableRooms.some((item) => item.roomTypeId === room.roomTypeId)
+                ) {
+                  throw new ReservationInputError(
+                    "INVALID_POLICY",
+                    `Cancellation policy does not apply to room ${roomIndex + 1}`,
+                  );
+                }
+                roomPolicies.push({
+                  roomIndex,
+                  roomTypeId: room.roomTypeId,
+                  policyId: policy.id,
+                  snapshot: { policy, rules },
+                });
               }
-              cancellationPolicyId = policy.id;
-              cancellationPolicySnapshot = { policy, rules };
+              cancellationPolicySnapshot = { type: "per_room", rooms: roomPolicies };
+              roomPolicySnapshots = roomPolicies;
             } else {
-              cancellationPolicySnapshot = {
-                name: "100% cancellation charge",
-                type: "non_refundable",
-                chargeType: "percentage",
-                chargeValue: 100,
-              };
+              const selectedPolicyId =
+                body.cancellationPolicyId === null
+                  ? null
+                  : (body.cancellationPolicyId ??
+                    priced.appliedCampaigns.find((campaign) => campaign.cancellationPolicyId)
+                      ?.cancellationPolicyId);
+              if (selectedPolicyId) {
+                const [policy] = await tx
+                  .select()
+                  .from(cancellationPolicies)
+                  .where(
+                    and(
+                      eq(cancellationPolicies.id, selectedPolicyId),
+                      eq(cancellationPolicies.isActive, true),
+                      eq(cancellationPolicies.appliesPhone, true),
+                    ),
+                  )
+                  .limit(1);
+                if (
+                  !policy ||
+                  (policy.stayStart && policy.stayStart > body.checkInDate) ||
+                  (policy.stayEnd && policy.stayEnd < dates[dates.length - 1])
+                ) {
+                  throw new ReservationInputError(
+                    "INVALID_POLICY",
+                    "Phone cancellation policy is unavailable for this stay",
+                  );
+                }
+                const [rules, applicableRooms] = await Promise.all([
+                  tx
+                    .select()
+                    .from(cancellationRules)
+                    .where(eq(cancellationRules.policyId, policy.id)),
+                  tx
+                    .select({ roomTypeId: cancellationPolicyRoomTypes.roomTypeId })
+                    .from(cancellationPolicyRoomTypes)
+                    .where(eq(cancellationPolicyRoomTypes.policyId, policy.id)),
+                ]);
+                if (
+                  applicableRooms.length &&
+                  roomTypeIds.some(
+                    (id) => !applicableRooms.some((applicable) => applicable.roomTypeId === id),
+                  )
+                ) {
+                  throw new ReservationInputError(
+                    "INVALID_POLICY",
+                    "Cancellation policy does not apply to all selected rooms",
+                  );
+                }
+                cancellationPolicyId = policy.id;
+                cancellationPolicySnapshot = { policy, rules };
+              } else {
+                cancellationPolicySnapshot = {
+                  name: "100% cancellation charge",
+                  type: "non_refundable",
+                  chargeType: "percentage",
+                  chargeValue: 100,
+                };
+              }
             }
           }
 
@@ -784,6 +940,15 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             ),
           });
           const bookingTotal = totals.bookingTotal;
+          const earlyContext = body.checkIn
+            ? await getEarlyCheckInContext(tx, body.checkInDate)
+            : null;
+          if (earlyContext?.required && body.earlyCheckIn?.acknowledged !== true) {
+            throw new ReservationInputError("EARLY_CHECK_IN_CONFIRMATION_REQUIRED", "Confirm early check-in before the standard check-in time", 409);
+          }
+          if (earlyContext?.required && body.earlyCheckIn && body.earlyCheckIn.paymentTiming === "now" && body.earlyCheckIn.chargeAmount > 0 && !body.earlyCheckIn.paymentMethodId) {
+            throw new ReservationInputError("INVALID_EARLY_CHECK_IN", "Early check-in details or payment method are invalid");
+          }
           if (body.payment && body.payment.amount > bookingTotal) {
             throw new ReservationInputError("INVALID_PAYMENT", "Payment exceeds the booking total");
           }
@@ -857,6 +1022,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             roomUnitId: string;
             roomNumber: string;
           }[] = [];
+          const createdRoomIds: string[] = [];
           for (const [roomIndex, room] of body.rooms.entries()) {
             const option = availabilityByType.get(room.roomTypeId)!;
             const roomNights = priced.rows.filter((night) => night.roomIndex === roomIndex);
@@ -875,6 +1041,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                   : null,
               })
               .returning({ id: reservationRooms.id });
+            createdRoomIds.push(createdRoom.id);
             if (room.roomUnitId) {
               createdRoomAssignments.push({
                 reservationRoomId: createdRoom.id,
@@ -939,6 +1106,20 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               });
             }
           }
+          if (roomPolicySnapshots) {
+            await tx
+              .update(reservations)
+              .set({
+                cancellationPolicySnapshot: {
+                  type: "per_room",
+                  rooms: roomPolicySnapshots.map((entry) => ({
+                    ...entry,
+                    reservationRoomId: createdRoomIds[entry.roomIndex],
+                  })),
+                },
+              })
+              .where(eq(reservations.id, id));
+          }
 
           for (const item of body.experiences ?? []) {
             const selected = variantById.get(item.variantId)!;
@@ -994,6 +1175,24 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                 .returning({ id: reservationDeposits.id })
             : [];
 
+          const earlyCharge = earlyContext?.required && body.earlyCheckIn
+            ? await addEarlyCheckInCharge(tx, {
+                reservationId: id,
+                checkInDate: body.checkInDate,
+                actorUserId: request.authUser!.id,
+                earlyCheckIn: body.earlyCheckIn,
+              })
+            : null;
+          const finalBookingTotal = bookingTotal + (earlyContext?.required ? body.earlyCheckIn?.chargeAmount ?? 0 : 0);
+          const finalPaidAmount = paidAmount + (earlyCharge?.paymentId ? body.earlyCheckIn!.chargeAmount : 0);
+          const finalRemainingBalance = finalBookingTotal - finalPaidAmount;
+          const finalPaymentStatus = finalPaidAmount >= finalBookingTotal
+            ? "paid"
+            : finalPaidAmount > 0 ? "partial" : "unpaid";
+          if (finalPaymentStatus !== paymentStatus) {
+            await tx.update(reservations).set({ paymentStatus: finalPaymentStatus }).where(eq(reservations.id, id));
+          }
+
           const eventBaseTime = new Date();
           let eventOffset = 0;
           const nextEventTime = () => new Date(eventBaseTime.getTime() + eventOffset++);
@@ -1046,6 +1245,36 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               details: { amount: body.deposit!.amount, methodId: body.deposit!.methodId },
             });
           }
+          if (earlyCharge?.chargeId) {
+            await recordReservationEvent(tx, {
+              reservationId: id,
+              eventType: "reservation.early_check_in_charged",
+              actorType: "user",
+              actorUserId: request.authUser!.id,
+              occurredAt: nextEventTime(),
+              reservationStatusBefore: "pending",
+              reservationStatusAfter: "pending",
+              paymentStatusBefore: paymentStatus,
+              paymentStatusAfter: finalPaymentStatus,
+              referenceId: earlyCharge.chargeId,
+              details: { amount: body.earlyCheckIn!.chargeAmount, paymentTiming: body.earlyCheckIn!.paymentTiming },
+            });
+          }
+          if (earlyCharge?.paymentId) {
+            await recordReservationEvent(tx, {
+              reservationId: id,
+              eventType: "payment.recorded",
+              actorType: "user",
+              actorUserId: request.authUser!.id,
+              occurredAt: nextEventTime(),
+              reservationStatusBefore: "pending",
+              reservationStatusAfter: "pending",
+              paymentStatusBefore: paymentStatus,
+              paymentStatusAfter: finalPaymentStatus,
+              referenceId: earlyCharge.paymentId,
+              details: { amount: body.earlyCheckIn!.chargeAmount, methodId: body.earlyCheckIn!.paymentMethodId, source: "early_check_in" },
+            });
+          }
           if (body.confirm) {
             await recordReservationEvent(tx, {
               reservationId: id,
@@ -1056,7 +1285,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               reservationStatusBefore: "pending",
               reservationStatusAfter: "confirmed",
               paymentStatusBefore: paymentStatus,
-              paymentStatusAfter: paymentStatus,
+              paymentStatusAfter: finalPaymentStatus,
               details: { bookingCode, source: body.source, automatic: body.source === "ota" },
             });
           }
@@ -1074,11 +1303,19 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               reservationStatusBefore: "confirmed",
               reservationStatusAfter: "checked_in",
               paymentStatusBefore: paymentStatus,
-              paymentStatusAfter: paymentStatus,
+              paymentStatusAfter: finalPaymentStatus,
               details: {
                 rooms: createdRoomAssignments,
-                remainingBalance,
+                remainingBalance: finalRemainingBalance,
                 outstandingAcknowledged: remainingBalance > 0,
+                earlyCheckIn: earlyContext?.required ? {
+                  standardCheckInTime: earlyContext.standardCheckInTime,
+                  serverTime: earlyContext.serverTime,
+                  chargeAmount: body.earlyCheckIn?.chargeAmount ?? 0,
+                  paymentTiming: body.earlyCheckIn?.paymentTiming ?? "later",
+                  chargeId: earlyCharge?.chargeId ?? null,
+                  paymentId: earlyCharge?.paymentId ?? null,
+                } : null,
               },
             });
           }
@@ -1086,9 +1323,9 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             id,
             bookingCode,
             reservationStatus,
-            paymentStatus,
+            paymentStatus: finalPaymentStatus,
             checkedInAt,
-            bookingTotal,
+            bookingTotal: finalBookingTotal,
             discountTotal: priced.discountTotal,
             appliedCampaigns: priced.appliedCampaigns,
             rooms: body.rooms.map((room) => ({
@@ -1108,8 +1345,8 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               serviceDate: item.serviceDate ?? null,
               unitPrice: variantById.get(item.variantId)!.variant.price,
             })),
-            paidAmount,
-            remainingBalance,
+            paidAmount: finalPaidAmount,
+            remainingBalance: finalRemainingBalance,
             payment: body.payment
               ? { methodId: body.payment.methodId, amount: body.payment.amount }
               : body.source === "ota"
@@ -1130,6 +1367,9 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
         });
         return reply.code(outcome.replayed ? 200 : 201).send(outcome);
       } catch (error) {
+        if (error instanceof EarlyCheckInError) {
+          return reply.code(400).send(errorBody(error.code, error.message));
+        }
         if (error instanceof InvalidPromoCodeError) {
           return reply.code(400).send(errorBody("INVALID_PROMO_CODE", error.message));
         }

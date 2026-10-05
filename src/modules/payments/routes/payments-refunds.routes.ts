@@ -5,6 +5,7 @@ import { payments } from "../../../db/schema/payments.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { calculateCancellationSettlement } from "../../reservations/services/reservation-cancellation-settlement.service.js";
 import { readReservationFinancials } from "../../reservations/services/reservation-financials.service.js";
+import { getNoRefundDecision } from "../../reservations/services/reservation-no-refund.service.js";
 
 type Query = {
   search?: string;
@@ -72,13 +73,15 @@ export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
       ]);
       const items = await Promise.all(
         rows.map(async ({ reservation, guest }) => {
-          const [settlement, financials] = await Promise.all([
+          const [settlement, financials, noRefundDecision] = await Promise.all([
             calculateCancellationSettlement(app.db, reservation),
             readReservationFinancials(app.db, reservation.id),
+            getNoRefundDecision(app.db, reservation.id),
           ]);
           const estimatedRefundAmount = settlement.amounts.estimatedRefundAmount;
-          const status =
-            financials.pendingRefundAmount > 0
+          const status = noRefundDecision
+            ? "no_refund"
+            : financials.pendingRefundAmount > 0
               ? "processing"
               : financials.grossPaidAmount > 0 && financials.netPaidAmount === 0
                 ? "completed"

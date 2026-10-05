@@ -57,7 +57,7 @@ export async function calculateCancellationSettlement(db: QueryDatabase, reserva
     throw new Error("Cancellation settlement requires a cancelled reservation");
   }
 
-  const [financials, roomNights] = await Promise.all([
+  const [financials, roomNights, bookedRooms] = await Promise.all([
     readReservationFinancials(db, reservation.id),
     db
       .select({
@@ -69,6 +69,14 @@ export async function calculateCancellationSettlement(db: QueryDatabase, reserva
       .innerJoin(reservationRooms, eq(reservationRoomNights.reservationRoomId, reservationRooms.id))
       .where(eq(reservationRooms.reservationId, reservation.id))
       .orderBy(asc(reservationRoomNights.stayDate)),
+    db
+      .select({
+        id: reservationRooms.id,
+        roomTypeName: reservationRooms.roomTypeNameSnapshot,
+      })
+      .from(reservationRooms)
+      .where(eq(reservationRooms.reservationId, reservation.id))
+      .orderBy(asc(reservationRooms.createdAt), asc(reservationRooms.id)),
   ]);
 
   const {
@@ -86,8 +94,96 @@ export async function calculateCancellationSettlement(db: QueryDatabase, reserva
   let policyName: string | null = null;
   let appliedRule: CancellationRule | null = null;
   let cancellationCharge: number | null = null;
+  const roomPolicyBreakdown: {
+    roomIndex: number;
+    roomTypeName: string;
+    policyId: string | null;
+    policyName: string | null;
+    appliedRule: CancellationRule | null;
+    roomTotal: number;
+    cancellationCharge: number | null;
+  }[] = [];
 
-  if (isRecord(snapshot) && snapshot.type === "non_refundable") {
+  if (isRecord(snapshot) && snapshot.type === "per_room" && Array.isArray(snapshot.rooms)) {
+    policyName = "Per-room cancellation policies";
+    if (
+      snapshot.rooms.length !== bookedRooms.length ||
+      roomNights.reduce((sum, night) => sum + night.finalPrice, 0) !== roomTotal
+    ) {
+      reviewReasons.push("Room policy snapshots or room-night prices do not match the reservation");
+    } else {
+      let totalCharge = 0;
+      for (const [roomIndex, room] of bookedRooms.entries()) {
+        const entry = snapshot.rooms.find(
+          (item) => isRecord(item) && item.reservationRoomId === room.id,
+        );
+        const nights = roomNights.filter((night) => night.reservationRoomId === room.id);
+        const roomAmount = nights.reduce((sum, night) => sum + night.finalPrice, 0);
+        if (!isRecord(entry) || !isRecord(entry.snapshot)) {
+          reviewReasons.push(`Invalid cancellation policy snapshot for room ${roomIndex + 1}`);
+          continue;
+        }
+        const roomSnapshot = entry.snapshot;
+        let roomRule: CancellationRule | null = null;
+        let roomCharge: number | null = null;
+        const roomPolicyName =
+          roomSnapshot.type === "non_refundable"
+            ? typeof roomSnapshot.name === "string"
+              ? roomSnapshot.name
+              : "Non-refundable"
+            : isRecord(roomSnapshot.policy) && typeof roomSnapshot.policy.name === "string"
+              ? roomSnapshot.policy.name
+              : null;
+        if (roomSnapshot.type === "non_refundable") {
+          roomCharge = roomAmount;
+        } else if (isRecord(roomSnapshot.policy) && Array.isArray(roomSnapshot.rules)) {
+          const rules = roomSnapshot.rules.map(parseRule);
+          if (rules.some((rule) => rule === null)) {
+            reviewReasons.push(`Invalid cancellation rule for room ${roomIndex + 1}`);
+          } else {
+            roomRule =
+              (rules as CancellationRule[])
+                .filter((rule) =>
+                  rule.timingType === "more_than"
+                    ? daysBeforeCheckIn > rule.daysBefore
+                    : daysBeforeCheckIn <= rule.daysBefore,
+                )
+                .sort((left, right) => left.sortOrder - right.sortOrder)[0] ?? null;
+            if (!roomRule) {
+              reviewReasons.push(`No cancellation rule matches room ${roomIndex + 1}`);
+            } else if (roomRule.chargeType === "percentage") {
+              roomCharge = Math.min(
+                roomAmount,
+                Math.round((roomAmount * roomRule.chargeValue) / 100),
+              );
+            } else if (roomRule.chargeType === "fixed") {
+              roomCharge = Math.min(roomAmount, roomRule.chargeValue);
+            } else {
+              roomCharge = Math.min(
+                roomAmount,
+                nights
+                  .slice(0, roomRule.chargeValue)
+                  .reduce((sum, night) => sum + night.finalPrice, 0),
+              );
+            }
+          }
+        } else {
+          reviewReasons.push(`Missing cancellation policy for room ${roomIndex + 1}`);
+        }
+        roomPolicyBreakdown.push({
+          roomIndex: typeof entry.roomIndex === "number" ? entry.roomIndex : roomIndex,
+          roomTypeName: room.roomTypeName,
+          policyId: typeof entry.policyId === "string" ? entry.policyId : null,
+          policyName: roomPolicyName,
+          appliedRule: roomRule,
+          roomTotal: roomAmount,
+          cancellationCharge: roomCharge,
+        });
+        if (roomCharge !== null) totalCharge += roomCharge;
+      }
+      if (!reviewReasons.length) cancellationCharge = totalCharge;
+    }
+  } else if (isRecord(snapshot) && snapshot.type === "non_refundable") {
     policyName = typeof snapshot.name === "string" ? snapshot.name : "Non-refundable";
     cancellationCharge = roomTotal;
   } else if (isRecord(snapshot) && isRecord(snapshot.policy) && Array.isArray(snapshot.rules)) {
@@ -149,6 +245,7 @@ export async function calculateCancellationSettlement(db: QueryDatabase, reserva
       name: policyName,
       daysBeforeCheckIn,
       appliedRule,
+      rooms: roomPolicyBreakdown,
     },
     amounts: {
       bookingTotal,
@@ -159,6 +256,8 @@ export async function calculateCancellationSettlement(db: QueryDatabase, reserva
       netPaidAmount,
       depositBalance,
       cancellationCharge,
+      maximumRefundWithoutOverride:
+        cancellationCharge === null ? null : Math.max(0, netPaidAmount - cancellationCharge),
       estimatedRefundAmount:
         calculationStatus === "calculated" && cancellationCharge !== null
           ? Math.max(0, netPaidAmount - cancellationCharge)
