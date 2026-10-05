@@ -46,19 +46,10 @@ const categories: MasterCategory[] = [
   { category: "cancellation_policy_types", names: ["Flexible", "Non-refundable", "Custom"] },
 ];
 
-// All combinations offered by the room form; selection belongs to each room type.
-const occupancyCombinations = [
-  [1, 0],
-  [1, 1],
-  [1, 2],
-  [1, 3],
-  [2, 0],
-  [2, 1],
-  [2, 2],
-  [2, 3],
-  [3, 0],
-  [3, 1],
-] as const;
+// Child capacity can match adult capacity; selection belongs to each room type.
+const occupancyCombinations = Array.from({ length: 15 }, (_, index) => index + 1).flatMap(
+  (adults) => Array.from({ length: adults + 1 }, (_, children) => [adults, children] as const),
+);
 
 function codeFor(name: string): string {
   return name

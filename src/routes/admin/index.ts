@@ -9,6 +9,7 @@ import { campaignRoutes } from "../../modules/campaigns/index.js";
 import { experienceRoutes } from "../../modules/experiences/index.js";
 import { guestRoutes } from "../../modules/guests/index.js";
 import { reservationSettingsRoutes } from "../../modules/settings/index.js";
+import { roleRoutes, userRoutes } from "../../modules/users/index.js";
 import {
   paymentListRoutes,
   paymentTransactionRoutes,
@@ -48,6 +49,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(experienceRoutes, { prefix: "/experiences" });
   await app.register(guestRoutes, { prefix: "/guests" });
   await app.register(reservationSettingsRoutes, { prefix: "/settings" });
+  await app.register(userRoutes, { prefix: "/users" });
+  await app.register(roleRoutes, { prefix: "/roles" });
   await app.register(paymentListRoutes, { prefix: "/payments" });
   await app.register(paymentTransactionRoutes, { prefix: "/payments" });
   await app.register(paymentRefundListRoutes, { prefix: "/payments" });
