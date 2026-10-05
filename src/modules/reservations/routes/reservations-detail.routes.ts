@@ -8,6 +8,7 @@ import { reservationRoomNights } from "../../../db/schema/reservation_room_night
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
+import { users } from "../../../db/schema/users.schema.js";
 import { readReservationFinancials } from "../services/reservation-financials.service.js";
 
 const paramsSchema = {
@@ -85,10 +86,25 @@ export const reservationDetailRoutes: FastifyPluginAsync = async (app) => {
             .filter((id): id is string => Boolean(id)),
         ]),
       ];
-      const methods = methodIds.length
-        ? await app.db.select().from(masterItems).where(inArray(masterItems.id, methodIds))
-        : [];
+      const recorderIds = [
+        ...new Set([
+          ...financials.payments.map((payment) => payment.recordedByUserId),
+          ...financials.refunds.map((refund) => refund.processedByUserId),
+        ].filter((id): id is string => Boolean(id))),
+      ];
+      const [methods, recorders] = await Promise.all([
+        methodIds.length
+          ? app.db.select().from(masterItems).where(inArray(masterItems.id, methodIds))
+          : Promise.resolve([]),
+        recorderIds.length
+          ? app.db
+              .select({ id: users.id, name: users.name })
+              .from(users)
+              .where(inArray(users.id, recorderIds))
+          : Promise.resolve([]),
+      ]);
       const methodById = new Map(methods.map((method) => [method.id, method]));
+      const recorderById = new Map(recorders.map((user) => [user.id, user]));
       const appliedCampaigns = [
         ...new Map(
           nights
@@ -113,8 +129,16 @@ export const reservationDetailRoutes: FastifyPluginAsync = async (app) => {
         payments: financials.payments.map((payment) => ({
           ...payment,
           method: methodById.get(payment.methodId) ?? null,
+          recordedBy: payment.recordedByUserId
+            ? (recorderById.get(payment.recordedByUserId) ?? null)
+            : null,
         })),
-        refunds: financials.refunds,
+        refunds: financials.refunds.map((refund) => ({
+          ...refund,
+          processedBy: refund.processedByUserId
+            ? (recorderById.get(refund.processedByUserId) ?? null)
+            : null,
+        })),
         deposits: financials.deposits.map((deposit) => ({
           ...deposit,
           method: deposit.methodId ? (methodById.get(deposit.methodId) ?? null) : null,

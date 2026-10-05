@@ -12,3 +12,4 @@ export { reservationCheckOutRoutes } from "./routes/reservations-check-out.route
 export { reservationCancelRoutes } from "./routes/reservations-cancel.routes.js";
 export { reservationCancellationSettlementRoutes } from "./routes/reservations-cancellation-settlement.routes.js";
 export { reservationRefundRoutes } from "./routes/reservations-refund.routes.js";
+export { reservationRefundProcessingRoutes } from "./routes/reservations-refund-processing.routes.js";

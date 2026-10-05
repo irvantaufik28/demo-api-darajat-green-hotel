@@ -9,6 +9,12 @@ import { campaignRoutes } from "../../modules/campaigns/index.js";
 import { experienceRoutes } from "../../modules/experiences/index.js";
 import { guestRoutes } from "../../modules/guests/index.js";
 import {
+  paymentListRoutes,
+  paymentTransactionRoutes,
+  paymentRefundListRoutes,
+  paymentOutstandingRoutes,
+} from "../../modules/payments/index.js";
+import {
   reservationListRoutes,
   reservationArrivalsTodayRoutes,
   reservationDeparturesTodayRoutes,
@@ -23,6 +29,7 @@ import {
   reservationCancelRoutes,
   reservationCancellationSettlementRoutes,
   reservationRefundRoutes,
+  reservationRefundProcessingRoutes,
 } from "../../modules/reservations/index.js";
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
@@ -36,6 +43,10 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(campaignRoutes, { prefix: "/campaigns" });
   await app.register(experienceRoutes, { prefix: "/experiences" });
   await app.register(guestRoutes, { prefix: "/guests" });
+  await app.register(paymentListRoutes, { prefix: "/payments" });
+  await app.register(paymentTransactionRoutes, { prefix: "/payments" });
+  await app.register(paymentRefundListRoutes, { prefix: "/payments" });
+  await app.register(paymentOutstandingRoutes, { prefix: "/payments" });
   await app.register(reservationListRoutes, { prefix: "/reservations" });
   await app.register(reservationArrivalsTodayRoutes, { prefix: "/reservations" });
   await app.register(reservationDeparturesTodayRoutes, { prefix: "/reservations" });
@@ -50,4 +61,5 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(reservationCancelRoutes, { prefix: "/reservations" });
   await app.register(reservationCancellationSettlementRoutes, { prefix: "/reservations" });
   await app.register(reservationRefundRoutes, { prefix: "/reservations" });
+  await app.register(reservationRefundProcessingRoutes, { prefix: "/reservations" });
 };

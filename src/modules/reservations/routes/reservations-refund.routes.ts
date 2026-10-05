@@ -1,5 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
+import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { paymentRefunds } from "../../../db/schema/payment_refunds.schema.js";
 import { payments } from "../../../db/schema/payments.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
@@ -14,6 +15,7 @@ type RefundBody = {
   amount: number;
   reason: string;
   reference: string;
+  ignoreCancellationPolicy?: boolean;
   settlementOverrideReason?: string;
 };
 
@@ -32,6 +34,7 @@ const bodySchema = {
     amount: { type: "integer", minimum: 1, maximum: 9007199254740991 },
     reason: { type: "string", minLength: 1, maxLength: 2000 },
     reference: { type: "string", minLength: 1, maxLength: 160 },
+    ignoreCancellationPolicy: { type: "boolean", default: false },
     settlementOverrideReason: { type: "string", minLength: 1, maxLength: 2000 },
   },
 } as const;
@@ -47,6 +50,90 @@ class RefundInputError extends Error {
 }
 
 export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
+  app.get<{ Params: RefundParams }>(
+    "/:id/refund-eligibility",
+    {
+      preHandler: app.requirePermission("payments.view_detail"),
+      schema: { params: paramsSchema },
+    },
+    async (request, reply) => {
+      const [reservation] = await app.db
+        .select()
+        .from(reservations)
+        .where(eq(reservations.id, request.params.id))
+        .limit(1);
+      if (!reservation) {
+        return reply.code(404).send({
+          error: { code: "RESERVATION_NOT_FOUND", message: "Reservation not found" },
+        });
+      }
+      if (reservation.reservationStatus !== "cancelled") {
+        return reply.code(409).send({
+          error: { code: "REFUND_NOT_ALLOWED", message: "Reservation must be cancelled first" },
+        });
+      }
+      const [settlement, financials] = await Promise.all([
+        calculateCancellationSettlement(app.db, reservation),
+        readReservationFinancials(app.db, reservation.id),
+      ]);
+      const methodIds = [...new Set(financials.payments.map((payment) => payment.methodId))];
+      const methods = methodIds.length
+        ? await app.db
+            .select({ id: masterItems.id, name: masterItems.name })
+            .from(masterItems)
+            .where(inArray(masterItems.id, methodIds))
+        : [];
+      const methodById = new Map(methods.map((method) => [method.id, method.name]));
+      return {
+        reservationId: reservation.id,
+        bookingCode: reservation.bookingCode,
+        source: reservation.source,
+        hasCancellationPolicySnapshot: reservation.cancellationPolicySnapshot !== null,
+        settlement,
+        grossPaidAmount: financials.grossPaidAmount,
+        refundedAmount: financials.refundedAmount,
+        pendingRefundAmount: financials.pendingRefundAmount,
+        maxRefundWithOverride: Math.max(
+          0,
+          financials.netPaidAmount - financials.pendingRefundAmount,
+        ),
+        refunds: financials.refunds.map((refund) => ({
+          id: refund.id,
+          paymentId: refund.paymentId,
+          amount: refund.amount,
+          status: refund.status,
+          reason: refund.reason,
+          reference: refund.providerReference,
+          processedAt: refund.processedAt,
+        })),
+        payments: financials.payments
+          .filter((payment) => ["succeeded", "partially_refunded"].includes(payment.status))
+          .map((payment) => {
+            const refunds = financials.refunds.filter((refund) => refund.paymentId === payment.id);
+            const refundedAmount = refunds.reduce(
+              (sum, refund) => sum + (refund.status === "succeeded" ? refund.amount : 0),
+              0,
+            );
+            const pendingAmount = refunds.reduce(
+              (sum, refund) => sum + (refund.status === "pending" ? refund.amount : 0),
+              0,
+            );
+            return {
+              id: payment.id,
+              methodId: payment.methodId,
+              methodName: methodById.get(payment.methodId) ?? null,
+              paidAt: payment.paidAt,
+              status: payment.status,
+              amount: payment.amount,
+              refundedAmount,
+              pendingAmount,
+              refundableRemaining: Math.max(0, payment.amount - refundedAmount - pendingAmount),
+            };
+          }),
+      };
+    },
+  );
+
   app.post<{ Params: RefundParams; Body: RefundBody }>(
     "/:id/refunds",
     {
@@ -131,15 +218,24 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
               "Refund amount exceeds the unrefunded payment balance",
             );
           }
+          const ignoreCancellationPolicy = request.body.ignoreCancellationPolicy === true;
           const settlementOverrideReason = request.body.settlementOverrideReason?.trim();
-          if (settlement.calculationStatus === "manual_review_required") {
-            if (!settlementOverrideReason) {
-              throw new RefundInputError(
-                "SETTLEMENT_REVIEW_REQUIRED",
-                "Review the cancellation settlement and provide settlementOverrideReason",
-              );
-            }
-          } else if (request.body.amount > (settlement.amounts.estimatedRefundAmount ?? 0)) {
+          if (
+            (ignoreCancellationPolicy ||
+              settlement.calculationStatus === "manual_review_required") &&
+            !settlementOverrideReason
+          ) {
+            throw new RefundInputError(
+              "SETTLEMENT_REVIEW_REQUIRED",
+              "Review the cancellation settlement and provide settlementOverrideReason",
+            );
+          }
+          if (
+            !ignoreCancellationPolicy &&
+            settlement.calculationStatus === "calculated" &&
+            request.body.amount >
+              (settlement.amounts.estimatedRefundAmount ?? 0) - financials.pendingRefundAmount
+          ) {
             throw new RefundInputError(
               "REFUND_EXCEEDS_SETTLEMENT",
               "Refund amount exceeds the remaining cancellation settlement refund",
@@ -176,7 +272,9 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           const reservationPaymentStatus =
             financials.grossPaidAmount > 0 && netPaidAmount === 0
               ? "refunded"
-              : reservation.paymentStatus;
+              : netPaidAmount < financials.bookingTotal
+                ? "partial"
+                : "paid";
           await tx
             .update(reservations)
             .set({
@@ -203,8 +301,10 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
               reason,
               reference,
               settlementCalculationStatus: settlement.calculationStatus,
+              cancellationPolicyOverridden: ignoreCancellationPolicy,
               settlementOverrideReason: settlementOverrideReason ?? null,
               settlementReviewReasons: settlement.reviewReasons,
+              cancellationPolicySnapshot: reservation.cancellationPolicySnapshot,
               estimatedRefundAmountBefore: settlement.amounts.estimatedRefundAmount,
               paymentRefundedAmount: refundedForPayment,
               netPaidAmount,
