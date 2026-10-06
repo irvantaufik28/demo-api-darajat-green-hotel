@@ -9,6 +9,12 @@ import { campaignRoutes } from "../../modules/campaigns/index.js";
 import { experienceRoutes } from "../../modules/experiences/index.js";
 import { guestRoutes } from "../../modules/guests/index.js";
 import { reservationSettingsRoutes } from "../../modules/settings/index.js";
+import {
+  reservationsReportRoutes,
+  revenueReportRoutes,
+  roomPerformanceReportRoutes,
+} from "../../modules/reports/index.js";
+import { uploadRoutes } from "../../modules/uploads/index.js";
 import { roleRoutes, userRoutes } from "../../modules/users/index.js";
 import {
   paymentListRoutes,
@@ -49,6 +55,10 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(experienceRoutes, { prefix: "/experiences" });
   await app.register(guestRoutes, { prefix: "/guests" });
   await app.register(reservationSettingsRoutes, { prefix: "/settings" });
+  await app.register(reservationsReportRoutes, { prefix: "/reports" });
+  await app.register(revenueReportRoutes, { prefix: "/reports" });
+  await app.register(roomPerformanceReportRoutes, { prefix: "/reports" });
+  await app.register(uploadRoutes, { prefix: "/uploads" });
   await app.register(userRoutes, { prefix: "/users" });
   await app.register(roleRoutes, { prefix: "/roles" });
   await app.register(paymentListRoutes, { prefix: "/payments" });
