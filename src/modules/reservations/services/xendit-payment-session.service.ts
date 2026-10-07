@@ -128,7 +128,9 @@ export async function createWebsitePaymentSession(
 
   if ("existing" in claim && claim.existing) return { ...response(claim.existing), replayed: true };
   const { created, bookingCode, guest } = claim;
-  const resultUrl = new URL("/booking/payment/instructions", xendit.websiteBaseUrl);
+  const successUrl = new URL("/booking/payment/success", xendit.websiteBaseUrl);
+  successUrl.searchParams.set("booking", bookingCode);
+  const resultUrl = new URL("/booking/payment/result", xendit.websiteBaseUrl);
   resultUrl.searchParams.set("booking", bookingCode);
   const firstName = guest.fullName.trim().split(/\s+/)[0] || "Guest";
   const surname = guest.fullName.trim().split(/\s+/).slice(1).join(" ") || firstName;
@@ -149,7 +151,7 @@ export async function createWebsitePaymentSession(
     },
     expires_at: created.expiresAt.toISOString(),
     description: `Green Hero booking ${bookingCode}`,
-    success_return_url: resultUrl.toString(),
+    success_return_url: successUrl.toString(),
     cancel_return_url: resultUrl.toString(),
     metadata: { reservation_id: reservationId },
   };
