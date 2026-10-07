@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, inArray, lt, lte } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lt, lte, or } from "drizzle-orm";
 import { guests } from "../../../db/schema/guests.schema.js";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
@@ -23,6 +23,33 @@ function addDays(date: string, days: number): string {
   const value = new Date(`${date}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
+}
+
+function jakartaDate(value: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: string) => parts.find((item) => item.type === type)!.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function displayCheckOutDate(booking: {
+  checkInDate: string;
+  checkOutDate: string;
+  checkedOutAt: Date | null;
+  reservationStatus: string;
+}, serverDate: string): string {
+  if (booking.reservationStatus === "checked_in" && booking.checkOutDate <= serverDate) {
+    return addDays(serverDate, 1);
+  }
+  if (booking.reservationStatus === "checked_out" && booking.checkedOutAt) {
+    const actualDate = jakartaDate(booking.checkedOutAt);
+    return actualDate === booking.checkInDate ? addDays(actualDate, 1) : actualDate;
+  }
+  return booking.checkOutDate;
 }
 
 export function validRoomRackDate(value: string): boolean {
@@ -50,9 +77,11 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
         id: roomTypes.id,
         code: roomTypes.code,
         name: roomTypes.name,
+        bedTypeName: masterItems.name,
         isActive: roomTypes.isActive,
       })
       .from(roomTypes)
+      .leftJoin(masterItems, eq(roomTypes.bedTypeId, masterItems.id))
       .where(typeFilter)
       .orderBy(asc(roomTypes.name), asc(roomTypes.id)),
     db
@@ -85,6 +114,7 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
         checkOutDate: reservations.checkOutDate,
         reservationStatus: reservations.reservationStatus,
         paymentStatus: reservations.paymentStatus,
+        checkedOutAt: reservations.checkedOutAt,
         guestId: guests.id,
         guestName: guests.fullName,
         guestPhone: guests.phone,
@@ -98,7 +128,14 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
           bookingFilter,
           inArray(reservations.reservationStatus, visibleStatuses),
           lt(reservations.checkInDate, endDateExclusive),
-          gt(reservations.checkOutDate, startDate),
+          or(
+            gt(reservations.checkOutDate, startDate),
+            eq(reservations.reservationStatus, "checked_in"),
+            and(
+              eq(reservations.reservationStatus, "checked_out"),
+              gte(reservations.checkedOutAt, new Date(`${startDate}T00:00:00+07:00`)),
+            ),
+          ),
         ),
       )
       .orderBy(asc(reservations.checkInDate), asc(reservations.bookingCode), asc(reservationRooms.id)),
@@ -125,13 +162,18 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
 
   const bookingRows = bookings.map((booking) => ({
     ...booking,
+    displayCheckOutDate: displayCheckOutDate(booking, clock.serverDate),
     operationalStatus: resolveReservationOperationalStatus(
       booking.reservationStatus,
       booking.checkInDate,
       booking.checkOutDate,
       clock,
     ),
-  }));
+  })).filter((booking) =>
+    booking.checkInDate < booking.displayCheckOutDate &&
+    booking.checkInDate < endDateExclusive &&
+    booking.displayCheckOutDate > startDate,
+  );
   const inventoryByKey = new Map(
     inventory.map((row) => [`${row.roomTypeId}:${row.stayDate}`, row]),
   );
@@ -170,7 +212,7 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
           (booking) =>
             occupyingStatuses.has(booking.reservationStatus) &&
             booking.checkInDate <= stayDate &&
-            booking.checkOutDate > stayDate,
+            booking.displayCheckOutDate > stayDate,
         );
         const bookedRooms = occupying.length;
         const unassignedRooms = occupying.filter((booking) => booking.roomUnitId === null).length;
