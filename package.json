@@ -19,6 +19,8 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "node --env-file-if-exists=.env --import tsx src/db/seed.ts",
     "db:seed:master": "node --env-file-if-exists=.env --import tsx src/db/seed-master.ts",
+    "db:seed:hotel": "node --env-file-if-exists=.env --import tsx src/db/seed-hotel.ts",
+    "db:seed:web-settings-permission": "node --env-file-if-exists=.env --import tsx src/db/seed-web-settings-permission.ts",
     "format": "prettier --write \"src/**/*.ts\" drizzle.config.ts package.json",
     "format:check": "prettier --check \"src/**/*.ts\" drizzle.config.ts package.json"
   },

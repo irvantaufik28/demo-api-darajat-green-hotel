@@ -26,6 +26,12 @@ type PermissionSeed = {
 const permissionSeeds: PermissionSeed[] = [
   { code: "dashboard.view", module: "Dashboard", label: "View Dashboard", allowed: all },
   { code: "master.view", module: "Master", label: "View Master Data", allowed: all },
+  {
+    code: "web_settings.manage",
+    module: "Web Settings",
+    label: "Manage Web Settings",
+    allowed: management,
+  },
   ...[
     ["create", "Create Master Data"],
     ["edit", "Edit Master Data"],

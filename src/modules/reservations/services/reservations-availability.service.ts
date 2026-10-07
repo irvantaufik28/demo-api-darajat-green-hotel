@@ -2,18 +2,23 @@ import {
   and,
   count,
   eq,
+  exists,
   gt,
   gte,
   inArray,
   lt,
   lte,
   notInArray,
+  isNull,
+  ne,
+  or,
 } from "drizzle-orm";
 
 import type { Database } from "../../../plugins/database.js";
 
 import { capacityPatterns } from "../../../db/schema/capacity_patterns.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
+import { paymentSessions } from "../../../db/schema/payment_sessions.schema.js";
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
 import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.schema.js";
 import { roomTypeCapacityPatterns } from "../../../db/schema/room_type_capacity_patterns.schema.js";
@@ -26,10 +31,7 @@ import { bookingDateJakarta } from "./reservations-campaigns.service.js";
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type QueryDatabase = Database | Transaction;
 
-export function stayDates(
-  checkInDate: string,
-  checkOutDate: string,
-): string[] | null {
+export function stayDates(checkInDate: string, checkOutDate: string): string[] | null {
   const start = new Date(`${checkInDate}T00:00:00.000Z`);
   const end = new Date(`${checkOutDate}T00:00:00.000Z`);
 
@@ -43,18 +45,14 @@ export function stayDates(
     return null;
   }
 
-  const nights = Math.round(
-    (end.getTime() - start.getTime()) / 86_400_000,
-  );
+  const nights = Math.round((end.getTime() - start.getTime()) / 86_400_000);
 
   if (nights > 366) {
     return null;
   }
 
   return Array.from({ length: nights }, (_, index) =>
-    new Date(start.getTime() + index * 86_400_000)
-      .toISOString()
-      .slice(0, 10),
+    new Date(start.getTime() + index * 86_400_000).toISOString().slice(0, 10),
   );
 }
 
@@ -89,12 +87,7 @@ export async function readRoomAvailability(
       childBreakfastPrice: roomTypes.childBreakfastPrice,
     })
     .from(roomTypes)
-    .where(
-      and(
-        eq(roomTypes.isActive, true),
-        roomTypeFilter,
-      ),
-    );
+    .where(and(eq(roomTypes.isActive, true), roomTypeFilter));
 
   if (!types.length) {
     return [];
@@ -129,97 +122,75 @@ export async function readRoomAvailability(
   // 3. KEEP CAPACITY MISMATCHES VISIBLE IN THE RESPONSE
   // ======================================================
 
-  const requiresReadyRoom =
-    checkInDate <= bookingDateJakarta();
+  const requiresReadyRoom = checkInDate <= bookingDateJakarta();
 
   // ======================================================
   // 4. GET INVENTORY + PHYSICAL ROOMS + ACTIVE BOOKINGS
   // ======================================================
 
-  const [inventory, unitCounts, bookings, maintenanceBlocks] =
-    await Promise.all([
-      db
-        .select()
-        .from(roomInventoryDaily)
-        .where(
-          and(
-            inArray(
-              roomInventoryDaily.roomTypeId,
-              roomTypeIds,
-            ),
-            gte(
-              roomInventoryDaily.stayDate,
-              dates[0],
-            ),
-            lte(
-              roomInventoryDaily.stayDate,
-              dates[dates.length - 1],
-            ),
-          ),
+  const [inventory, unitCounts, bookings, maintenanceBlocks] = await Promise.all([
+    db
+      .select()
+      .from(roomInventoryDaily)
+      .where(
+        and(
+          inArray(roomInventoryDaily.roomTypeId, roomTypeIds),
+          gte(roomInventoryDaily.stayDate, dates[0]),
+          lte(roomInventoryDaily.stayDate, dates[dates.length - 1]),
         ),
+      ),
 
-      db
-        .select({
-          roomTypeId: roomUnits.roomTypeId,
-          total: count(),
-        })
-        .from(roomUnits)
-        .where(
-          and(
-            inArray(
-              roomUnits.roomTypeId,
-              roomTypeIds,
-            ),
-            eq(roomUnits.isActive, true),
-            notInArray(
-              roomUnits.operationalStatus,
-              ["maintenance", "out_of_service"],
-            ),
-          ),
-        )
-        .groupBy(roomUnits.roomTypeId),
-
-      db
-        .select({
-          roomTypeId: reservationRooms.roomTypeId,
-          roomUnitId: reservationRooms.roomUnitId,
-          checkInDate: reservations.checkInDate,
-          checkOutDate: reservations.checkOutDate,
-        })
-        .from(reservationRooms)
-        .innerJoin(
-          reservations,
-          eq(
-            reservationRooms.reservationId,
-            reservations.id,
-          ),
-        )
-        .where(
-          and(
-            inArray(
-              reservationRooms.roomTypeId,
-              roomTypeIds,
-            ),
-            inArray(
-              reservations.reservationStatus,
-              [
-                "pending",
-                "confirmed",
-                "checked_in",
-              ],
-            ),
-            lt(
-              reservations.checkInDate,
-              checkOutDate,
-            ),
-            gt(
-              reservations.checkOutDate,
-              checkInDate,
-            ),
-          ),
+    db
+      .select({
+        roomTypeId: roomUnits.roomTypeId,
+        total: count(),
+      })
+      .from(roomUnits)
+      .where(
+        and(
+          inArray(roomUnits.roomTypeId, roomTypeIds),
+          eq(roomUnits.isActive, true),
+          notInArray(roomUnits.operationalStatus, ["maintenance", "out_of_service"]),
         ),
-      readActiveMaintenanceBlocks(db, checkInDate, checkOutDate, roomTypeIds),
-    ]);
+      )
+      .groupBy(roomUnits.roomTypeId),
+
+    db
+      .select({
+        roomTypeId: reservationRooms.roomTypeId,
+        roomUnitId: reservationRooms.roomUnitId,
+        checkInDate: reservations.checkInDate,
+        checkOutDate: reservations.checkOutDate,
+      })
+      .from(reservationRooms)
+      .innerJoin(reservations, eq(reservationRooms.reservationId, reservations.id))
+      .where(
+        and(
+          inArray(reservationRooms.roomTypeId, roomTypeIds),
+          inArray(reservations.reservationStatus, ["pending", "confirmed", "checked_in"]),
+          or(
+            ne(reservations.source, "website"),
+            ne(reservations.reservationStatus, "pending"),
+            isNull(reservations.paymentExpiresAt),
+            gt(reservations.paymentExpiresAt, new Date()),
+            exists(
+              db
+                .select({ id: paymentSessions.id })
+                .from(paymentSessions)
+                .where(
+                  and(
+                    eq(paymentSessions.reservationId, reservations.id),
+                    inArray(paymentSessions.status, ["creating", "active"]),
+                  ),
+                ),
+            ),
+          ),
+          lt(reservations.checkInDate, checkOutDate),
+          gt(reservations.checkOutDate, checkInDate),
+        ),
+      ),
+    readActiveMaintenanceBlocks(db, checkInDate, checkOutDate, roomTypeIds),
+  ]);
 
   // ======================================================
   // 5. GET ROOM UNITS THAT CAN BE ASSIGNED
@@ -230,23 +201,15 @@ export async function readRoomAvailability(
       id: roomUnits.id,
       roomTypeId: roomUnits.roomTypeId,
       roomNumber: roomUnits.roomNumber,
-      bedConfiguration:
-        roomUnits.bedConfiguration,
-      operationalStatus:
-        roomUnits.operationalStatus,
+      bedConfiguration: roomUnits.bedConfiguration,
+      operationalStatus: roomUnits.operationalStatus,
     })
     .from(roomUnits)
     .where(
       and(
-        inArray(
-          roomUnits.roomTypeId,
-          roomTypeIds,
-        ),
+        inArray(roomUnits.roomTypeId, roomTypeIds),
         eq(roomUnits.isActive, true),
-        notInArray(
-          roomUnits.operationalStatus,
-          ["maintenance", "out_of_service"],
-        ),
+        notInArray(roomUnits.operationalStatus, ["maintenance", "out_of_service"]),
       ),
     );
   const operationalUnitIds = new Set(assignableUnits.map((unit) => unit.id));
@@ -256,18 +219,10 @@ export async function readRoomAvailability(
   // ======================================================
 
   const inventoryByKey = new Map(
-    inventory.map((row) => [
-      `${row.roomTypeId}:${row.stayDate}`,
-      row,
-    ]),
+    inventory.map((row) => [`${row.roomTypeId}:${row.stayDate}`, row]),
   );
 
-  const unitsByType = new Map(
-    unitCounts.map((row) => [
-      row.roomTypeId,
-      row.total,
-    ]),
-  );
+  const unitsByType = new Map(unitCounts.map((row) => [row.roomTypeId, row.total]));
 
   // ======================================================
   // 7. BUILD AVAILABILITY RESPONSE
@@ -286,18 +241,12 @@ export async function readRoomAvailability(
       ? roomCapacityPatterns
           .filter(
             (capacity) =>
-              capacity.adults === guests.adults &&
-              capacity.children === guests.children,
+              capacity.adults === guests.adults && capacity.children === guests.children,
           )
-          .map(
-            (capacity) =>
-              capacity.extraBeds,
-          )
+          .map((capacity) => capacity.extraBeds)
       : [];
 
-    const requiredExtraBeds = guests && matchingBeds.length
-      ? Math.min(...matchingBeds)
-      : null;
+    const requiredExtraBeds = guests && matchingBeds.length ? Math.min(...matchingBeds) : null;
 
     // ------------------------------------------------------
     // Find room units already assigned to overlapping booking
@@ -305,15 +254,8 @@ export async function readRoomAvailability(
 
     const assignedDuringStay = new Set(
       bookings
-        .filter(
-          (booking) =>
-            booking.roomTypeId === type.id &&
-            booking.roomUnitId !== null,
-        )
-        .map(
-          (booking) =>
-            booking.roomUnitId,
-        ),
+        .filter((booking) => booking.roomTypeId === type.id && booking.roomUnitId !== null)
+        .map((booking) => booking.roomUnitId),
     );
     const blockedDuringStay = new Set(
       maintenanceBlocks
@@ -325,34 +267,26 @@ export async function readRoomAvailability(
     // Find room units available for assignment
     // ------------------------------------------------------
 
-    const roomUnitsForAssignment =
-      assignableUnits
-        .filter(
-          (unit) =>
-            unit.roomTypeId === type.id &&
-            !assignedDuringStay.has(unit.id) &&
-            !blockedDuringStay.has(unit.id) &&
-            (
-              !requiresReadyRoom ||
-              unit.operationalStatus ===
-                "available"
-            ),
-        )
-        .map((unit) => ({
-          id: unit.id,
-          roomNumber: unit.roomNumber,
-          bedConfiguration:
-            unit.bedConfiguration,
-          operationalStatus:
-            unit.operationalStatus,
-        }));
+    const roomUnitsForAssignment = assignableUnits
+      .filter(
+        (unit) =>
+          unit.roomTypeId === type.id &&
+          !assignedDuringStay.has(unit.id) &&
+          !blockedDuringStay.has(unit.id) &&
+          (!requiresReadyRoom || unit.operationalStatus === "available"),
+      )
+      .map((unit) => ({
+        id: unit.id,
+        roomNumber: unit.roomNumber,
+        bedConfiguration: unit.bedConfiguration,
+        operationalStatus: unit.operationalStatus,
+      }));
 
     // ------------------------------------------------------
     // Physical room count
     // ------------------------------------------------------
 
-    const physicalRooms =
-      unitsByType.get(type.id) ?? 0;
+    const physicalRooms = unitsByType.get(type.id) ?? 0;
 
     let totalPrice = 0;
 
@@ -374,17 +308,15 @@ export async function readRoomAvailability(
     // ------------------------------------------------------
 
     const nightlyRates = dates.map((date) => {
-      const configured =
-        inventoryByKey.get(
-          `${type.id}:${date}`,
-        );
+      const configured = inventoryByKey.get(`${type.id}:${date}`);
       const maintenanceBlocked = new Set(
         maintenanceBlocks
-          .filter((block) =>
-            block.roomTypeId === type.id &&
-            block.startDate <= date &&
-            block.endDate > date &&
-            operationalUnitIds.has(block.roomUnitId),
+          .filter(
+            (block) =>
+              block.roomTypeId === type.id &&
+              block.startDate <= date &&
+              block.endDate > date &&
+              operationalUnitIds.has(block.roomUnitId),
           )
           .map((block) => block.roomUnitId),
       ).size;
@@ -421,15 +353,9 @@ export async function readRoomAvailability(
         Math.max(0, physicalRooms - maintenanceBlocked),
       );
 
-      const available = Math.max(
-        0,
-        maxSellable - occupied,
-      );
+      const available = Math.max(0, maxSellable - occupied);
 
-      availableRooms = Math.min(
-        availableRooms,
-        available,
-      );
+      availableRooms = Math.min(availableRooms, available);
 
       if (configured.stopSell) {
         reasons.add("stop_sell");
@@ -446,8 +372,7 @@ export async function readRoomAvailability(
       return {
         stayDate: date,
         basePrice: configured.basePrice,
-        sellableStock:
-          configured.sellableStock,
+        sellableStock: configured.sellableStock,
         occupied,
         maintenanceBlocked,
         available,
@@ -468,24 +393,15 @@ export async function readRoomAvailability(
 
       availableRooms,
 
-      assignableRoomUnits:
-        roomUnitsForAssignment,
+      assignableRoomUnits: roomUnitsForAssignment,
 
       requiredExtraBeds,
 
-      totalPrice: reasons.has(
-        "not_configured",
-      )
-        ? null
-        : totalPrice,
+      totalPrice: reasons.has("not_configured") ? null : totalPrice,
 
-      bookable:
-        availableRooms > 0 &&
-        reasons.size === 0,
+      bookable: availableRooms > 0 && reasons.size === 0,
 
-      unavailableReasons: [
-        ...reasons,
-      ],
+      unavailableReasons: [...reasons],
 
       nightlyRates,
     };

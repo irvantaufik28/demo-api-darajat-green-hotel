@@ -6,6 +6,12 @@ export type AppConfig = {
   databaseUrl: string;
   jwtSecret: string;
   corsOrigins: string[];
+  xendit: {
+    apiBaseUrl: string;
+    secretKey: string;
+    webhookToken: string;
+    websiteBaseUrl: string;
+  } | null;
   cloudinary: {
     cloudName: string;
     apiKey: string;
@@ -48,11 +54,17 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  const xenditApiBaseUrl = environment.XENDIT_API_BASE_URL?.trim() ?? "";
+  const xenditSecretKey = environment.XENDIT_SECRET_KEY?.trim() ?? "";
+  const xenditWebhookToken = environment.XENDIT_WEBHOOK_TOKEN?.trim() ?? "";
+  const websiteBaseUrl = environment.WEBSITE_BASE_URL?.trim() ?? "";
   const cloudinaryUrl = environment.CLOUDINARY_URL?.trim();
   const cloudinaryCredentials = cloudinaryUrl ? parseCloudinaryUrl(cloudinaryUrl) : null;
-  const cloudName = cloudinaryCredentials?.cloudName ?? environment.CLOUDINARY_CLOUD_NAME?.trim() ?? "";
+  const cloudName =
+    cloudinaryCredentials?.cloudName ?? environment.CLOUDINARY_CLOUD_NAME?.trim() ?? "";
   const apiKey = cloudinaryCredentials?.apiKey ?? environment.CLOUDINARY_API_KEY?.trim() ?? "";
-  const apiSecret = cloudinaryCredentials?.apiSecret ?? environment.CLOUDINARY_API_SECRET?.trim() ?? "";
+  const apiSecret =
+    cloudinaryCredentials?.apiSecret ?? environment.CLOUDINARY_API_SECRET?.trim() ?? "";
   const folder = environment.CLOUDINARY_UPLOAD_FOLDER?.trim() || "greenhero";
 
   if (!environments.includes(nodeEnv as AppConfig["nodeEnv"])) {
@@ -77,6 +89,56 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     throw new Error("CORS_ORIGINS must contain HTTP or HTTPS origins");
   }
   if (
+    [xenditApiBaseUrl, xenditSecretKey, xenditWebhookToken, websiteBaseUrl].some(Boolean) &&
+    ![xenditApiBaseUrl, xenditSecretKey, xenditWebhookToken, websiteBaseUrl].every(Boolean)
+  ) {
+    throw new Error(
+      "XENDIT_API_BASE_URL, XENDIT_SECRET_KEY, XENDIT_WEBHOOK_TOKEN, and WEBSITE_BASE_URL must be set together",
+    );
+  }
+  if (xenditApiBaseUrl) {
+    let parsed: URL;
+    try {
+      parsed = new URL(xenditApiBaseUrl);
+    } catch {
+      throw new Error("XENDIT_API_BASE_URL must be an absolute HTTPS origin");
+    }
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash ||
+      parsed.username ||
+      parsed.password
+    ) {
+      throw new Error("XENDIT_API_BASE_URL must be an HTTPS origin without a path");
+    }
+  }
+  if (websiteBaseUrl) {
+    let parsed: URL;
+    try {
+      parsed = new URL(websiteBaseUrl);
+    } catch {
+      throw new Error("WEBSITE_BASE_URL must be an absolute URL");
+    }
+    const isLocalDevelopment =
+      nodeEnv !== "production" &&
+      parsed.protocol === "http:" &&
+      ["localhost", "127.0.0.1"].includes(parsed.hostname);
+    if (
+      !(parsed.protocol === "https:" || isLocalDevelopment) ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash ||
+      parsed.username ||
+      parsed.password
+    ) {
+      throw new Error(
+        "WEBSITE_BASE_URL must be an HTTPS origin (HTTP localhost is allowed outside production)",
+      );
+    }
+  }
+  if (
     [cloudName, apiKey, apiSecret].some(Boolean) &&
     ![cloudName, apiKey, apiSecret].every(Boolean)
   ) {
@@ -96,6 +158,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     databaseUrl,
     jwtSecret,
     corsOrigins,
+    xendit: xenditSecretKey
+      ? {
+          apiBaseUrl: xenditApiBaseUrl,
+          secretKey: xenditSecretKey,
+          webhookToken: xenditWebhookToken,
+          websiteBaseUrl,
+        }
+      : null,
     cloudinary: cloudName && apiKey && apiSecret ? { cloudName, apiKey, apiSecret, folder } : null,
   };
 }

@@ -3,12 +3,19 @@ import { authRoutes } from "../../modules/auth/index.js";
 import { profileRoutes } from "../../modules/profile/index.js";
 import { dashboardRoutes } from "../../modules/dashboard/index.js";
 import { masterRoutes } from "../../modules/master/index.js";
-import { roomTypeRoutes, roomNumberRoutes, roomMaintenanceRoutes } from "../../modules/rooms/index.js";
+import {
+  roomTypeRoutes,
+  roomNumberRoutes,
+  roomMaintenanceRoutes,
+} from "../../modules/rooms/index.js";
 import { pricesStocksRoutes } from "../../modules/prices-stocks/index.js";
 import { cancellationPolicyRoutes } from "../../modules/cancellation-policies/index.js";
 import { campaignRoutes } from "../../modules/campaigns/index.js";
 import { experienceRoutes } from "../../modules/experiences/index.js";
 import { guestRoutes } from "../../modules/guests/index.js";
+import { hotelInfoAdminRoutes } from "../../modules/hotel-info/index.js";
+import { featuredRoomsAdminRoutes } from "../../modules/featured-rooms/index.js";
+import { galleryAdminRoutes } from "../../modules/gallery/index.js";
 import { reservationSettingsRoutes } from "../../modules/settings/index.js";
 import {
   reservationsReportRoutes,
@@ -59,6 +66,9 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(campaignRoutes, { prefix: "/campaigns" });
   await app.register(experienceRoutes, { prefix: "/experiences" });
   await app.register(guestRoutes, { prefix: "/guests" });
+  await app.register(hotelInfoAdminRoutes, { prefix: "/hotel-info" });
+  await app.register(featuredRoomsAdminRoutes, { prefix: "/featured-rooms" });
+  await app.register(galleryAdminRoutes, { prefix: "/gallery" });
   await app.register(reservationSettingsRoutes, { prefix: "/settings" });
   await app.register(reservationsReportRoutes, { prefix: "/reports" });
   await app.register(revenueReportRoutes, { prefix: "/reports" });

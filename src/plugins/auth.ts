@@ -2,7 +2,7 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppConfig } from "../config/env.js";
 import { permissions } from "../db/schema/permissions.schema.js";
@@ -26,6 +26,9 @@ declare module "fastify" {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     requirePermission: (
       code: string,
+    ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    requireAnyPermission: (
+      codes: string[],
     ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 
@@ -101,6 +104,24 @@ export function registerAuth(app: FastifyInstance, config: AppConfig): void {
       .from(rolePermissions)
       .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
       .where(and(eq(rolePermissions.roleId, request.authUser.roleId), eq(permissions.code, code)))
+      .limit(1);
+
+    if (!granted) {
+      reply.code(403).send({ error: { code: "FORBIDDEN", message: "Permission denied" } });
+    }
+  });
+
+  app.decorate("requireAnyPermission", (codes: string[]) => async (request, reply) => {
+    await app.authenticate(request, reply);
+    if (reply.sent || !request.authUser) return;
+
+    const [granted] = await app.db
+      .select({ id: permissions.id })
+      .from(rolePermissions)
+      .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
+      .where(
+        and(eq(rolePermissions.roleId, request.authUser.roleId), inArray(permissions.code, codes)),
+      )
       .limit(1);
 
     if (!granted) {

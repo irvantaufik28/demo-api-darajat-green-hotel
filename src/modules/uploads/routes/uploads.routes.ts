@@ -47,7 +47,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     "/",
     {
-      preHandler: app.requirePermission("reservations.edit"),
+      preHandler: app.requireAnyPermission(["reservations.edit", "web_settings.manage"]),
       config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
     },
     async (request, reply) => {

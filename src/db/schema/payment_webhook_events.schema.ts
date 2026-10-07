@@ -1,5 +1,6 @@
 import { jsonb, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { idColumn } from "./columns.js";
+import { paymentSessions } from "./payment_sessions.schema.js";
 import { payments } from "./payments.schema.js";
 
 import { appSchema } from "./app-schema.js";
@@ -11,6 +12,7 @@ export const paymentWebhookEvents = appSchema.table(
     provider: varchar("provider", { length: 80 }).notNull(),
     eventId: varchar("event_id", { length: 160 }).notNull(),
     paymentId: uuid("payment_id").references(() => payments.id),
+    paymentSessionId: uuid("payment_session_id").references(() => paymentSessions.id),
     eventType: varchar("event_type", { length: 80 }).notNull(),
     payload: jsonb("payload").notNull(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),

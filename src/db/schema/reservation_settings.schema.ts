@@ -24,7 +24,7 @@ export const reservationSettings = appSchema.table(
   (table) => [
     check(
       "reservation_settings_values_check",
-      sql`${table.websitePaymentExpiryMinutes} >= 1 and ${table.noShowMode} = 'manual'`,
+      sql`${table.websitePaymentExpiryMinutes} >= 11 and ${table.noShowMode} = 'manual'`,
     ),
   ],
 );

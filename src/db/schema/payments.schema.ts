@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn, rupiah } from "./columns.js";
 import { masterItems } from "./master_items.schema.js";
+import { paymentSessions } from "./payment_sessions.schema.js";
 import { reservations } from "./reservations.schema.js";
 import { users } from "./users.schema.js";
 
@@ -26,6 +27,7 @@ export const payments = appSchema.table(
     methodId: uuid("method_id")
       .notNull()
       .references(() => masterItems.id),
+    paymentSessionId: uuid("payment_session_id").references(() => paymentSessions.id),
     provider: varchar("provider", { length: 80 }),
     providerReference: varchar("provider_reference", { length: 160 }),
     amount: rupiah("amount").notNull(),
@@ -40,6 +42,7 @@ export const payments = appSchema.table(
   },
   (table) => [
     index("payments_reservation_idx").on(table.reservationId),
+    index("payments_session_idx").on(table.paymentSessionId),
     index("payments_provider_reference_idx").on(table.providerReference),
     uniqueIndex("payments_provider_reference_uq")
       .on(table.provider, table.providerReference)

@@ -38,7 +38,7 @@ const bodySchema = {
     autoConfirmWebsiteAfterPayment: { type: "boolean" },
     allowOutstandingCheckIn: { type: "boolean" },
     allowOutstandingCheckOut: { type: "boolean" },
-    websitePaymentExpiryMinutes: { type: "integer", minimum: 1, maximum: 1440 },
+    websitePaymentExpiryMinutes: { type: "integer", minimum: 11, maximum: 1440 },
   },
 } as const;
 
@@ -61,18 +61,14 @@ function response(row: typeof reservationSettings.$inferSelect | undefined) {
 }
 
 export const reservationSettingsRoutes: FastifyPluginAsync = async (app) => {
-  app.get(
-    "/reservations",
-    { preHandler: app.requirePermission("master.view") },
-    async () => {
-      const [row] = await app.db
-        .select()
-        .from(reservationSettings)
-        .where(eq(reservationSettings.id, settingsId))
-        .limit(1);
-      return response(row);
-    },
-  );
+  app.get("/reservations", { preHandler: app.requirePermission("master.view") }, async () => {
+    const [row] = await app.db
+      .select()
+      .from(reservationSettings)
+      .where(eq(reservationSettings.id, settingsId))
+      .limit(1);
+    return response(row);
+  });
 
   app.put<{ Body: SettingsBody }>(
     "/reservations",
