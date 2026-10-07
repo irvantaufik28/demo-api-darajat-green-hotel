@@ -38,6 +38,25 @@ export class XenditWebhookError extends Error {
   }
 }
 
+function isDashboardTestPayload(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Record<string, unknown>;
+  if (payload.event !== "payment_session.completed" && payload.event !== "payment_session.expired")
+    return false;
+  if (!payload.data || typeof payload.data !== "object") return false;
+  const data = payload.data as Record<string, unknown>;
+  return (
+    data.reference_id === "test_session" &&
+    data.session_type === "SAVE" &&
+    typeof data.id === "string" &&
+    data.id.startsWith("ps-") &&
+    data.currency === "IDR" &&
+    Number.isSafeInteger(data.amount) &&
+    Number(data.amount) > 0 &&
+    data.status === (payload.event === "payment_session.completed" ? "COMPLETED" : "EXPIRED")
+  );
+}
+
 function parsePayload(value: unknown): WebhookPayload | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
@@ -52,9 +71,10 @@ function parsePayload(value: unknown): WebhookPayload | null {
   }
   const data = payload.data as Record<string, unknown>;
   const expectedStatus = payload.event === "payment_session.completed" ? "COMPLETED" : "EXPIRED";
+  const sessionId = data.payment_session_id ?? data.id;
   if (
-    typeof data.payment_session_id !== "string" ||
-    !data.payment_session_id ||
+    typeof sessionId !== "string" ||
+    !sessionId ||
     typeof data.reference_id !== "string" ||
     !data.reference_id ||
     data.session_type !== "PAY" ||
@@ -67,10 +87,14 @@ function parsePayload(value: unknown): WebhookPayload | null {
   ) {
     throw new XenditWebhookError("INVALID_WEBHOOK", "Invalid payment session event", 400);
   }
-  return payload as WebhookPayload;
+  return { ...payload, data: { ...data, payment_session_id: sessionId } } as WebhookPayload;
 }
 
 export async function processXenditWebhook(db: Database, rawPayload: unknown) {
+  // The dashboard sends a SAVE-session fixture that has no matching reservation.
+  if (isDashboardTestPayload(rawPayload)) {
+    return { received: true, ignored: true, reason: "dashboard_test" };
+  }
   const payload = parsePayload(rawPayload);
   if (!payload) return { received: true, ignored: true };
   const { data, event } = payload;
