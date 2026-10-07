@@ -17,6 +17,7 @@ export type AuthenticatedUser = {
   name: string;
   email: string;
   roleName: string;
+  photoUrl: string | null;
 };
 
 declare module "fastify" {
@@ -67,6 +68,7 @@ export function registerAuth(app: FastifyInstance, config: AppConfig): void {
         name: users.name,
         email: users.email,
         roleName: roles.name,
+        photoUrl: users.photoUrl,
       })
       .from(userSessions)
       .innerJoin(users, eq(userSessions.userId, users.id))

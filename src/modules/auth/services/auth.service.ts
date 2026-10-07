@@ -21,6 +21,7 @@ type Account = {
   name: string;
   email: string;
   roleName: string;
+  photoUrl: string | null;
 };
 
 export type AuthSession = {
@@ -62,6 +63,7 @@ export async function authenticateCredentials(
       name: users.name,
       email: users.email,
       roleName: roles.name,
+      photoUrl: users.photoUrl,
       passwordHash: users.passwordHash,
       isActive: users.isActive,
       roleIsActive: roles.isActive,
@@ -76,8 +78,8 @@ export async function authenticateCredentials(
   if (!account || !(await verifyPassword(account.passwordHash, password))) return null;
   if (!account.isActive || !account.roleIsActive) return null;
 
-  const { id, roleId, name, email, roleName } = account;
-  return { id, roleId, name, email, roleName };
+  const { id, roleId, name, email, roleName, photoUrl } = account;
+  return { id, roleId, name, email, roleName, photoUrl };
 }
 
 export async function issueSession(app: FastifyInstance, account: Account): Promise<AuthSession> {
@@ -125,6 +127,7 @@ export async function rotateSession(
       name: users.name,
       email: users.email,
       roleName: roles.name,
+      photoUrl: users.photoUrl,
     })
     .from(userSessions)
     .innerJoin(users, eq(userSessions.userId, users.id))
@@ -168,6 +171,7 @@ export async function rotateSession(
     name: session.name,
     email: session.email,
     roleName: session.roleName,
+    photoUrl: session.photoUrl,
   };
   return {
     accessToken,
