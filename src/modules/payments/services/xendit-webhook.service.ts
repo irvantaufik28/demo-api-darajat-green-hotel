@@ -199,8 +199,12 @@ export async function processXenditWebhook(db: Database, rawPayload: unknown) {
             reservationStatusAfter: "expired",
             paymentStatusBefore: "unpaid",
             paymentStatusAfter: "expired",
-            referenceId: data.payment_session_id,
-            details: { reason: "xendit_payment_session_expired", paymentSessionId: session.id },
+            referenceId: session.id,
+            details: {
+              reason: "xendit_payment_session_expired",
+              paymentSessionId: session.id,
+              providerSessionId: data.payment_session_id,
+            },
           });
         }
       }
@@ -319,9 +323,10 @@ export async function processXenditWebhook(db: Database, rawPayload: unknown) {
         reservationStatusAfter: nextReservationStatus,
         paymentStatusBefore: reservation.paymentStatus,
         paymentStatusAfter: nextPaymentStatus,
-        referenceId: data.payment_id,
+        referenceId: payment.id,
         details: {
           paymentId: payment.id,
+          providerPaymentId: data.payment_id,
           paymentSessionId: session.id,
           amount: payment.amount,
           provider: "xendit",
@@ -339,9 +344,10 @@ export async function processXenditWebhook(db: Database, rawPayload: unknown) {
         reservationStatusAfter: nextReservationStatus,
         paymentStatusBefore: reservation.paymentStatus,
         paymentStatusAfter: nextPaymentStatus,
-        referenceId: data.payment_session_id,
+        referenceId: session.id,
         details: {
           paymentSessionId: session.id,
+          providerSessionId: data.payment_session_id,
           reason: mustExpire ? "payment_completed_after_expiry" : "website_payment_completed",
         },
       });

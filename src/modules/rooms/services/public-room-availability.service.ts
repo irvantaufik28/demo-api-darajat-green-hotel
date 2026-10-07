@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or } from "drizzle-orm";
 import type { Database } from "../../../plugins/database.js";
 import { cancellationPolicies } from "../../../db/schema/cancellation_policies.schema.js";
 import { cancellationPolicyRoomTypes } from "../../../db/schema/cancellation_policy_room_types.schema.js";
@@ -67,7 +67,7 @@ async function websiteCancellationPolicies(
         or(isNull(cancellationPolicies.stayEnd), gte(cancellationPolicies.stayEnd, lastStayDate)),
       ),
     )
-    .orderBy(asc(cancellationPolicies.name));
+    .orderBy(desc(cancellationPolicies.createdAt), asc(cancellationPolicies.name));
   if (!policies.length) return [];
   const ids = policies.map((policy) => policy.id);
   const [links, rules, types] = await Promise.all([
@@ -95,6 +95,8 @@ async function websiteCancellationPolicies(
     id: policy.id,
     name: policy.name,
     policyType: policy.policyTypeId ? (typeNames.get(policy.policyTypeId) ?? null) : null,
+    noShowChargeType: policy.noShowChargeType,
+    noShowChargeValue: policy.noShowChargeValue,
     stayStart: policy.stayStart,
     stayEnd: policy.stayEnd,
     roomTypeIds: links.filter((link) => link.policyId === policy.id).map((link) => link.roomTypeId),
@@ -210,6 +212,8 @@ export async function searchPublicRoomAvailability(
                 id: null,
                 name: "100% cancellation charge",
                 policyType: "Non-refundable",
+                noShowChargeType: null,
+                noShowChargeValue: 0,
                 stayStart: null,
                 stayEnd: null,
                 rules: [
