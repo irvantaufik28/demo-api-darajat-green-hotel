@@ -19,6 +19,7 @@ import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.sche
 import { roomTypeCapacityPatterns } from "../../../db/schema/room_type_capacity_patterns.schema.js";
 import { roomTypes } from "../../../db/schema/room_types.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
+import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenance.service.js";
 
 import { bookingDateJakarta } from "./reservations-campaigns.service.js";
 
@@ -135,7 +136,7 @@ export async function readRoomAvailability(
   // 4. GET INVENTORY + PHYSICAL ROOMS + ACTIVE BOOKINGS
   // ======================================================
 
-  const [inventory, unitCounts, bookings] =
+  const [inventory, unitCounts, bookings, maintenanceBlocks] =
     await Promise.all([
       db
         .select()
@@ -217,6 +218,7 @@ export async function readRoomAvailability(
             ),
           ),
         ),
+      readActiveMaintenanceBlocks(db, checkInDate, checkOutDate, roomTypeIds),
     ]);
 
   // ======================================================
@@ -247,6 +249,7 @@ export async function readRoomAvailability(
         ),
       ),
     );
+  const operationalUnitIds = new Set(assignableUnits.map((unit) => unit.id));
 
   // ======================================================
   // 6. BUILD LOOKUP MAPS
@@ -312,6 +315,11 @@ export async function readRoomAvailability(
             booking.roomUnitId,
         ),
     );
+    const blockedDuringStay = new Set(
+      maintenanceBlocks
+        .filter((block) => block.roomTypeId === type.id)
+        .map((block) => block.roomUnitId),
+    );
 
     // ------------------------------------------------------
     // Find room units available for assignment
@@ -323,6 +331,7 @@ export async function readRoomAvailability(
           (unit) =>
             unit.roomTypeId === type.id &&
             !assignedDuringStay.has(unit.id) &&
+            !blockedDuringStay.has(unit.id) &&
             (
               !requiresReadyRoom ||
               unit.operationalStatus ===
@@ -369,6 +378,16 @@ export async function readRoomAvailability(
         inventoryByKey.get(
           `${type.id}:${date}`,
         );
+      const maintenanceBlocked = new Set(
+        maintenanceBlocks
+          .filter((block) =>
+            block.roomTypeId === type.id &&
+            block.startDate <= date &&
+            block.endDate > date &&
+            operationalUnitIds.has(block.roomUnitId),
+          )
+          .map((block) => block.roomUnitId),
+      ).size;
 
       const occupied = bookings.filter(
         (booking) =>
@@ -388,6 +407,7 @@ export async function readRoomAvailability(
           basePrice: null,
           sellableStock: null,
           occupied,
+          maintenanceBlocked,
           available: 0,
           minNights: null,
           stopSell: null,
@@ -398,7 +418,7 @@ export async function readRoomAvailability(
 
       const maxSellable = Math.min(
         configured.sellableStock,
-        physicalRooms,
+        Math.max(0, physicalRooms - maintenanceBlocked),
       );
 
       const available = Math.max(
@@ -429,6 +449,7 @@ export async function readRoomAvailability(
         sellableStock:
           configured.sellableStock,
         occupied,
+        maintenanceBlocked,
         available,
         minNights: configured.minNights,
         stopSell: configured.stopSell,

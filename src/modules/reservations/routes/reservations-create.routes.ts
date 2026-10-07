@@ -22,6 +22,7 @@ import { rolePermissions } from "../../../db/schema/role_permissions.schema.js";
 import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.schema.js";
 import { roomTypeCapacityPatterns } from "../../../db/schema/room_type_capacity_patterns.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
+import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenance.service.js";
 import { recordReservationEvent } from "../services/reservation-events.service.js";
 import { addEarlyCheckInCharge, EarlyCheckInError, getEarlyCheckInContext } from "../services/reservation-early-check-in.service.js";
 import { requestHash } from "../reservation-idempotency.js";
@@ -575,6 +576,10 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                 .for("update")
             : [];
           const assignedById = new Map(assignedUnits.map((unit) => [unit.id, unit]));
+          const maintenanceBlocks = assignedUnitIds.length
+            ? await readActiveMaintenanceBlocks(tx, body.checkInDate, body.checkOutDate, roomTypeIds)
+            : [];
+          const blockedUnitIds = new Set(maintenanceBlocks.map((block) => block.roomUnitId));
           for (const room of body.rooms) {
             if (!room.roomUnitId) continue;
             const unit = assignedById.get(room.roomUnitId);
@@ -582,6 +587,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               !unit ||
               unit.roomTypeId !== room.roomTypeId ||
               !unit.isActive ||
+              blockedUnitIds.has(unit.id) ||
               ["maintenance", "out_of_service"].includes(unit.operationalStatus) ||
               ((body.checkIn || body.checkInDate <= bookingDate) &&
                 unit.operationalStatus !== "available")

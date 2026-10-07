@@ -5,6 +5,7 @@ import { reservationDeposits } from "../../../db/schema/reservation_deposits.sch
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
+import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenance.service.js";
 import { uuidSchema } from "../../master/master.shared.js";
 import { recordReservationEvent } from "../services/reservation-events.service.js";
 import { readReservationFinancials } from "../services/reservation-financials.service.js";
@@ -197,12 +198,20 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
             .orderBy(roomUnits.id)
             .for("update");
           const unitsById = new Map(units.map((unit) => [unit.id, unit]));
+          const maintenanceBlocks = await readActiveMaintenanceBlocks(
+            tx,
+            reservation.checkInDate,
+            reservation.checkOutDate,
+            [...new Set(bookedRooms.map((room) => room.roomTypeId))],
+          );
+          const blockedUnitIds = new Set(maintenanceBlocks.map((block) => block.roomUnitId));
           for (const { room, roomUnitId } of finalAssignments) {
             const unit = unitsById.get(roomUnitId);
             if (
               !unit ||
               unit.roomTypeId !== room.roomTypeId ||
               !unit.isActive ||
+              blockedUnitIds.has(roomUnitId) ||
               unit.operationalStatus !== "available"
             ) {
               throw new CheckInInputError(

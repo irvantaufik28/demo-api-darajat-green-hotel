@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { authRoutes } from "../../modules/auth/index.js";
 import { dashboardRoutes } from "../../modules/dashboard/index.js";
 import { masterRoutes } from "../../modules/master/index.js";
-import { roomTypeRoutes, roomNumberRoutes } from "../../modules/rooms/index.js";
+import { roomTypeRoutes, roomNumberRoutes, roomMaintenanceRoutes } from "../../modules/rooms/index.js";
 import { pricesStocksRoutes } from "../../modules/prices-stocks/index.js";
 import { cancellationPolicyRoutes } from "../../modules/cancellation-policies/index.js";
 import { campaignRoutes } from "../../modules/campaigns/index.js";
@@ -24,6 +24,8 @@ import {
 } from "../../modules/payments/index.js";
 import {
   reservationListRoutes,
+  reservationRoomRackRoutes,
+  reservationAssignRoomRoutes,
   reservationArrivalsTodayRoutes,
   reservationDeparturesTodayRoutes,
   reservationInHouseRoutes,
@@ -49,6 +51,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(masterRoutes, { prefix: "/master" });
   await app.register(roomTypeRoutes, { prefix: "/room-types" });
   await app.register(roomNumberRoutes, { prefix: "/room-numbers" });
+  await app.register(roomMaintenanceRoutes, { prefix: "/room-maintenance-blocks" });
   await app.register(pricesStocksRoutes, { prefix: "/prices-stocks" });
   await app.register(cancellationPolicyRoutes, { prefix: "/cancellation-policies" });
   await app.register(campaignRoutes, { prefix: "/campaigns" });
@@ -66,6 +69,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(paymentRefundListRoutes, { prefix: "/payments" });
   await app.register(paymentOutstandingRoutes, { prefix: "/payments" });
   await app.register(reservationListRoutes, { prefix: "/reservations" });
+  await app.register(reservationRoomRackRoutes, { prefix: "/reservations" });
+  await app.register(reservationAssignRoomRoutes, { prefix: "/reservations" });
   await app.register(reservationArrivalsTodayRoutes, { prefix: "/reservations" });
   await app.register(reservationDeparturesTodayRoutes, { prefix: "/reservations" });
   await app.register(reservationInHouseRoutes, { prefix: "/reservations" });

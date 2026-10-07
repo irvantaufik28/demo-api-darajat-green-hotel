@@ -1,4 +1,6 @@
 export { reservationListRoutes } from "./routes/reservations-list.routes.js";
+export { reservationRoomRackRoutes } from "./routes/reservations-room-rack.routes.js";
+export { reservationAssignRoomRoutes } from "./routes/reservations-assign-room.routes.js";
 export { reservationArrivalsTodayRoutes } from "./routes/reservations-arrivals-today.routes.js";
 export { reservationDeparturesTodayRoutes } from "./routes/reservations-departures-today.routes.js";
 export { reservationInHouseRoutes } from "./routes/reservations-in-house.routes.js";

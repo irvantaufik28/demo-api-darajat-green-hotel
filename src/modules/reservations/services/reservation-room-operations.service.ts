@@ -10,6 +10,7 @@ import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.sche
 import { roomTypeCapacityPatterns } from "../../../db/schema/room_type_capacity_patterns.schema.js";
 import { roomTypes } from "../../../db/schema/room_types.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
+import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenance.service.js";
 import { bookingDateJakarta, priceRoomNights } from "./reservations-campaigns.service.js";
 import { stayDates } from "./reservations-availability.service.js";
 import { readReservationFinancials } from "./reservation-financials.service.js";
@@ -121,6 +122,10 @@ async function targetRoomAvailability(db: QueryDatabase, context: Awaited<Return
     throw new RoomOperationError("ROOM_UNIT_UNAVAILABLE", "Target room is not ready or inactive");
   }
   if (target.unit.id === room.roomUnitId) throw new RoomOperationError("NO_CHANGE", "Choose another room", 400);
+  const maintenanceBlocks = await readActiveMaintenanceBlocks(db, effectiveDate, reservation.checkOutDate, [target.roomType.id]);
+  if (maintenanceBlocks.some((block) => block.roomUnitId === targetRoomUnitId)) {
+    throw new RoomOperationError("ROOM_UNIT_UNAVAILABLE", "Target room has maintenance during this stay");
+  }
   const conflicting = await db.select({ id: reservationRooms.id }).from(reservationRooms)
     .innerJoin(reservations, eq(reservationRooms.reservationId, reservations.id))
     .where(and(eq(reservationRooms.roomUnitId, targetRoomUnitId), ne(reservations.id, reservation.id), inArray(reservations.reservationStatus, ["pending", "confirmed", "checked_in"]), lt(reservations.checkInDate, reservation.checkOutDate), gt(reservations.checkOutDate, effectiveDate))).limit(1);
@@ -147,7 +152,11 @@ async function targetRoomAvailability(db: QueryDatabase, context: Awaited<Return
     for (const date of remainingDates) {
       const daily = inventory.find((item) => item.stayDate === date);
       const occupied = booked.filter((item) => item.checkInDate <= date && item.checkOutDate > date).length;
-      if (!daily || daily.stopSell || Math.min(daily.sellableStock, activeUnits.length) <= occupied) {
+      const blockedUnitIds = new Set(maintenanceBlocks
+        .filter((block) => block.startDate <= date && block.endDate > date)
+        .map((block) => block.roomUnitId));
+      const physicalRooms = activeUnits.filter((unit) => !blockedUnitIds.has(unit.id)).length;
+      if (!daily || daily.stopSell || Math.min(daily.sellableStock, physicalRooms) <= occupied) {
         throw new RoomOperationError("ROOM_UNAVAILABLE", `Target room type has no sellable stock on ${date}`);
       }
     }

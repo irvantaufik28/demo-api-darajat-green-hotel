@@ -5,6 +5,7 @@ import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.schema.js";
 import { roomTypes } from "../../../db/schema/room_types.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
+import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenance.service.js";
 import {
   bookingDateJakarta,
   previewDailyCampaignPrices,
@@ -103,7 +104,7 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
       if (!roomType) return reply.code(404).send(errorBody("NOT_FOUND", "Room type not found"));
 
       const visibleDates = dates.slice((page - 1) * limit, page * limit);
-      const [configured, bookedRooms, [operationalRooms]] = visibleDates.length
+      const [configured, bookedRooms, operationalRooms, maintenanceBlocks] = visibleDates.length
         ? await Promise.all([
             app.db
               .select()
@@ -131,7 +132,7 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
                 ),
               ),
             app.db
-              .select({ total: count() })
+              .select({ id: roomUnits.id })
               .from(roomUnits)
               .where(
                 and(
@@ -140,9 +141,16 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
                   notInArray(roomUnits.operationalStatus, ["maintenance", "out_of_service"]),
                 ),
               ),
+            readActiveMaintenanceBlocks(
+              app.db,
+              visibleDates[0],
+              nextDate(visibleDates[visibleDates.length - 1]),
+              [roomTypeId],
+            ),
           ])
-        : [[], [], [{ total: 0 }]];
+        : [[], [], [], []];
       const byDate = new Map(configured.map((row) => [row.stayDate, row]));
+      const operationalUnitIds = new Set(operationalRooms.map((room) => room.id));
       const bookingDate = bookingDateJakarta();
       const campaignPreviews = visibleDates.length
         ? await previewDailyCampaignPrices(app.db, {
@@ -160,15 +168,25 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
         const bookedCount = bookedRooms.filter(
           (booking) => booking.checkInDate <= stayDate && booking.checkOutDate > stayDate,
         ).length;
+        const maintenanceBlockedRooms = new Set(
+          maintenanceBlocks
+            .filter((block) =>
+              block.startDate <= stayDate &&
+              block.endDate > stayDate &&
+              operationalUnitIds.has(block.roomUnitId)
+            )
+            .map((block) => block.roomUnitId),
+        ).size;
         return row
           ? {
               ...row,
               isConfigured: true,
               bookedRooms: bookedCount,
+              maintenanceBlockedRooms,
               remainingStock: Math.max(0, row.sellableStock - bookedCount),
               availableRooms: row.stopSell
                 ? 0
-                : Math.max(0, Math.min(row.sellableStock, operationalRooms.total) - bookedCount),
+                : Math.max(0, Math.min(row.sellableStock, operationalRooms.length - maintenanceBlockedRooms) - bookedCount),
               websitePromo: preview?.website.promo ?? null,
               webPrice: preview?.website.price ?? null,
               frontDeskPromo: preview?.frontDesk.promo ?? null,
@@ -185,6 +203,7 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
               version: null,
               isConfigured: false,
               bookedRooms: bookedCount,
+              maintenanceBlockedRooms,
               remainingStock: null,
               availableRooms: null,
               websitePromo: null,
@@ -197,7 +216,7 @@ export const pricesStocksRoutes: FastifyPluginAsync = async (app) => {
         roomType,
         totalRoomCount,
         stockLimit,
-        operationalRoomCount: operationalRooms.total,
+        operationalRoomCount: operationalRooms.length,
         campaignPreviewBookingDate: bookingDate,
         items,
         page,

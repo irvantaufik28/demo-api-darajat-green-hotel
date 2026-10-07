@@ -9,6 +9,7 @@ import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { roomInventoryDaily } from "../../../db/schema/room_inventory_daily.schema.js";
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
+import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenance.service.js";
 import { bookingDateJakarta, priceRoomNights } from "./reservations-campaigns.service.js";
 import { stayDates } from "./reservations-availability.service.js";
 import { readReservationFinancials } from "./reservation-financials.service.js";
@@ -40,7 +41,7 @@ export async function quoteExtendStay(db: QueryDatabase, reservationId: string, 
   }
   const typeIds = [...new Set(rooms.map((room) => room.roomTypeId))];
   const unitIds = rooms.map((room) => room.roomUnitId!);
-  const [inventory, units, overlapping, activeUnits, extraBeds, charges, financials] = await Promise.all([
+  const [inventory, units, overlapping, activeUnits, extraBeds, charges, financials, maintenanceBlocks] = await Promise.all([
     db.select().from(roomInventoryDaily).where(and(inArray(roomInventoryDaily.roomTypeId, typeIds), gte(roomInventoryDaily.stayDate, dates[0]), lte(roomInventoryDaily.stayDate, dates.at(-1)!))),
     db.select().from(roomUnits).where(inArray(roomUnits.id, unitIds)),
     db.select({ roomUnitId: reservationRooms.roomUnitId, roomTypeId: reservationRooms.roomTypeId, checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate })
@@ -51,6 +52,7 @@ export async function quoteExtendStay(db: QueryDatabase, reservationId: string, 
     db.select().from(reservationRoomExtraBeds).where(inArray(reservationRoomExtraBeds.reservationRoomId, rooms.map((room) => room.id))),
     db.select().from(reservationCharges).where(eq(reservationCharges.reservationId, reservationId)),
     readReservationFinancials(db, reservationId),
+    readActiveMaintenanceBlocks(db, dates[0], newCheckOutDate, typeIds),
   ]);
   for (const room of rooms) {
     const unit = units.find((item) => item.id === room.roomUnitId);
@@ -60,6 +62,9 @@ export async function quoteExtendStay(db: QueryDatabase, reservationId: string, 
     if (overlapping.some((item) => item.roomUnitId === room.roomUnitId)) {
       throw new ExtendStayError("ROOM_UNIT_UNAVAILABLE", `Room ${unit.roomNumber} is booked during the extension`);
     }
+    if (maintenanceBlocks.some((block) => block.roomUnitId === room.roomUnitId)) {
+      throw new ExtendStayError("ROOM_UNIT_UNAVAILABLE", `Room ${unit.roomNumber} has maintenance during the extension`);
+    }
   }
   const inventoryByKey = new Map(inventory.map((row) => [`${row.roomTypeId}:${row.stayDate}`, row]));
   const totalStayNights = stayDates(reservation.checkInDate, newCheckOutDate)?.length ?? dates.length;
@@ -68,7 +73,10 @@ export async function quoteExtendStay(db: QueryDatabase, reservationId: string, 
       const configured = inventoryByKey.get(`${typeId}:${date}`);
       const requested = rooms.filter((room) => room.roomTypeId === typeId).length;
       const occupied = overlapping.filter((room) => room.roomTypeId === typeId && room.checkInDate <= date && room.checkOutDate > date).length;
-      const physical = activeUnits.filter((unit) => unit.roomTypeId === typeId).length;
+      const blockedUnitIds = new Set(maintenanceBlocks
+        .filter((block) => block.roomTypeId === typeId && block.startDate <= date && block.endDate > date)
+        .map((block) => block.roomUnitId));
+      const physical = activeUnits.filter((unit) => unit.roomTypeId === typeId && !blockedUnitIds.has(unit.id)).length;
       if (!configured || configured.stopSell || configured.minNights > totalStayNights || Math.min(configured.sellableStock, physical) - occupied < requested) {
         throw new ExtendStayError("ROOM_UNAVAILABLE", `Room type is unavailable on ${date}`);
       }
