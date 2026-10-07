@@ -172,6 +172,15 @@ export async function createWebsitePaymentSession(
     );
   }
   if (!remote.ok) {
+    const errorPayload = (await remote.json().catch(() => null)) as {
+      error_code?: unknown;
+      message?: unknown;
+    } | null;
+    console.log("Xendit payment session creation failed", {
+      httpStatus: remote.status,
+      errorCode: typeof errorPayload?.error_code === "string" ? errorPayload.error_code : null,
+      message: typeof errorPayload?.message === "string" ? errorPayload.message : null,
+    });
     if (remote.status >= 400 && remote.status < 500) {
       await db
         .update(paymentSessions)
