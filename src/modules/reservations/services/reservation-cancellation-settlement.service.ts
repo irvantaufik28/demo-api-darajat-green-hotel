@@ -52,13 +52,17 @@ function calendarDaysBefore(checkInDate: string, cancelledAt: Date): number {
   );
 }
 
-export async function calculateCancellationSettlement(db: QueryDatabase, reservation: Reservation) {
+export async function calculateCancellationSettlement(
+  db: QueryDatabase,
+  reservation: Reservation,
+  existingFinancials?: Awaited<ReturnType<typeof readReservationFinancials>>,
+) {
   if (reservation.reservationStatus !== "cancelled" || !reservation.cancelledAt) {
     throw new Error("Cancellation settlement requires a cancelled reservation");
   }
 
   const [financials, roomNights, bookedRooms] = await Promise.all([
-    readReservationFinancials(db, reservation.id),
+    existingFinancials ?? readReservationFinancials(db, reservation.id),
     db
       .select({
         reservationRoomId: reservationRoomNights.reservationRoomId,

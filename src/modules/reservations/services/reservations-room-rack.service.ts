@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, inArray, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { guests } from "../../../db/schema/guests.schema.js";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
@@ -71,7 +71,7 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
     ? eq(roomInventoryDaily.roomTypeId, roomTypeId)
     : undefined;
 
-  const [types, units, bookings, inventory, maintenanceBlocks] = await Promise.all([
+  const [types, units, bookings, inventory, maintenanceBlocks, overdueUnassignedRows] = await Promise.all([
     db
       .select({
         id: roomTypes.id,
@@ -158,6 +158,36 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
         ),
       ),
     readActiveMaintenanceBlocks(db, startDate, endDateExclusive, roomTypeId ? [roomTypeId] : undefined),
+    db
+      .select({
+        reservationId: reservations.id,
+        reservationRoomId: sql<string>`(array_agg(${reservationRooms.id} order by ${reservationRooms.createdAt}, ${reservationRooms.id}))[1]`,
+        bookingCode: reservations.bookingCode,
+        guestName: guests.fullName,
+        roomTypeId: roomTypes.id,
+        roomTypeName: roomTypes.name,
+        source: reservations.source,
+        paymentStatus: reservations.paymentStatus,
+        checkInDate: reservations.checkInDate,
+        checkOutDate: reservations.checkOutDate,
+        unassignedRooms: sql<number>`count(*)::int`.mapWith(Number),
+      })
+      .from(reservationRooms)
+      .innerJoin(reservations, eq(reservationRooms.reservationId, reservations.id))
+      .innerJoin(guests, eq(reservations.guestId, guests.id))
+      .innerJoin(roomTypes, eq(reservationRooms.roomTypeId, roomTypes.id))
+      .where(
+        and(
+          bookingFilter,
+          eq(reservations.reservationStatus, "confirmed"),
+          isNull(reservationRooms.roomUnitId),
+          lte(reservations.checkOutDate, startDate),
+          lte(reservations.checkOutDate, bookingDateJakarta()),
+        ),
+      )
+      .groupBy(reservations.id, guests.id, roomTypes.id)
+      .orderBy(desc(reservations.checkOutDate), asc(reservations.bookingCode), asc(roomTypes.name))
+      .limit(51),
   ]);
 
   const bookingRows = bookings.map((booking) => ({
@@ -274,6 +304,8 @@ export async function readRoomRack(db: Database, query: RoomRackQuery) {
     dates,
     serverDate: clock.serverDate,
     campaignPreviewBookingDate: bookingDate,
+    overdueUnassigned: overdueUnassignedRows.slice(0, 50),
+    overdueUnassignedHasMore: overdueUnassignedRows.length > 50,
     groups,
   };
 }

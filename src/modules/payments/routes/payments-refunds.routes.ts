@@ -71,52 +71,56 @@ export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
           .innerJoin(guests, eq(reservations.guestId, guests.id))
           .where(filter),
       ]);
-      const items = await Promise.all(
-        rows.map(async ({ reservation, guest }) => {
-          const [settlement, financials, noRefundDecision] = await Promise.all([
-            calculateCancellationSettlement(app.db, reservation),
-            readReservationFinancials(app.db, reservation.id),
-            getNoRefundDecision(app.db, reservation.id),
-          ]);
-          const estimatedRefundAmount = settlement.amounts.estimatedRefundAmount;
-          const status = noRefundDecision
-            ? "no_refund"
-            : financials.pendingRefundAmount > 0
-              ? "processing"
-              : financials.grossPaidAmount > 0 && financials.netPaidAmount === 0
-                ? "completed"
-                : settlement.calculationStatus === "manual_review_required"
-                  ? "review_required"
-                  : estimatedRefundAmount === 0 && financials.refundedAmount === 0
-                    ? "no_refund_under_policy"
-                    : estimatedRefundAmount === 0 && financials.refundedAmount > 0
-                      ? "policy_settled"
-                      : financials.refundedAmount > 0
-                        ? "partially_refunded"
-                        : "action_required";
-          return {
-            reservationId: reservation.id,
-            bookingCode: reservation.bookingCode,
-            source: reservation.source,
-            guest,
-            cancelledAt: reservation.cancelledAt,
-            paymentStatus: reservation.paymentStatus,
-            status,
-            grossPaidAmount: financials.grossPaidAmount,
-            refundedAmount: financials.refundedAmount,
-            pendingRefundAmount: financials.pendingRefundAmount,
-            netPaidAmount: financials.netPaidAmount,
-            estimatedRefundAmount,
-            maxRefundWithOverride: Math.max(
-              0,
-              financials.netPaidAmount - financials.pendingRefundAmount,
-            ),
-            settlementCalculationStatus: settlement.calculationStatus,
-            policy: settlement.policy,
-            reviewReasons: settlement.reviewReasons,
-          };
-        }),
-      );
+      const items = [];
+      for (let offset = 0; offset < rows.length; offset += 2) {
+        const batch = await Promise.all(
+          rows.slice(offset, offset + 2).map(async ({ reservation, guest }) => {
+            const financials = await readReservationFinancials(app.db, reservation.id);
+            const [settlement, noRefundDecision] = await Promise.all([
+              calculateCancellationSettlement(app.db, reservation, financials),
+              getNoRefundDecision(app.db, reservation.id),
+            ]);
+            const estimatedRefundAmount = settlement.amounts.estimatedRefundAmount;
+            const status = noRefundDecision
+              ? "no_refund"
+              : financials.pendingRefundAmount > 0
+                ? "processing"
+                : financials.grossPaidAmount > 0 && financials.netPaidAmount === 0
+                  ? "completed"
+                  : settlement.calculationStatus === "manual_review_required"
+                    ? "review_required"
+                    : estimatedRefundAmount === 0 && financials.refundedAmount === 0
+                      ? "no_refund_under_policy"
+                      : estimatedRefundAmount === 0 && financials.refundedAmount > 0
+                        ? "policy_settled"
+                        : financials.refundedAmount > 0
+                          ? "partially_refunded"
+                          : "action_required";
+            return {
+              reservationId: reservation.id,
+              bookingCode: reservation.bookingCode,
+              source: reservation.source,
+              guest,
+              cancelledAt: reservation.cancelledAt,
+              paymentStatus: reservation.paymentStatus,
+              status,
+              grossPaidAmount: financials.grossPaidAmount,
+              refundedAmount: financials.refundedAmount,
+              pendingRefundAmount: financials.pendingRefundAmount,
+              netPaidAmount: financials.netPaidAmount,
+              estimatedRefundAmount,
+              maxRefundWithOverride: Math.max(
+                0,
+                financials.netPaidAmount - financials.pendingRefundAmount,
+              ),
+              settlementCalculationStatus: settlement.calculationStatus,
+              policy: settlement.policy,
+              reviewReasons: settlement.reviewReasons,
+            };
+          }),
+        );
+        items.push(...batch);
+      }
       return { items, page, limit, total: summary.total };
     },
   );
