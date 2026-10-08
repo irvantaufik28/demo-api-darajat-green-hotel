@@ -76,7 +76,7 @@ async function roomCancellationPolicies(
   return body.rooms.map((room, roomIndex) => {
     const eligible = policies.filter((policy) => {
       const assigned = links.filter((link) => link.policyId === policy.id);
-      return assigned.length === 0 || assigned.some((link) => link.roomTypeId === room.roomTypeId);
+      return assigned.some((link) => link.roomTypeId === room.roomTypeId);
     });
     const campaignIds = new Set(
       quote.nightlyRates

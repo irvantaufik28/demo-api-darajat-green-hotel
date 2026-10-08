@@ -177,7 +177,7 @@ export async function searchPublicRoomAvailability(
 
       const applicablePolicies = policies.filter(
         (policy) =>
-          policy.roomTypeIds.length === 0 || policy.roomTypeIds.includes(option.roomType.id),
+          policy.roomTypeIds.includes(option.roomType.id),
       );
       return {
         roomType: room ?? option.roomType,

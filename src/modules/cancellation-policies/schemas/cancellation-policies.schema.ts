@@ -56,7 +56,7 @@ export const cancellationPolicyBodySchema = {
     },
     noShowChargeValue: { type: "integer", minimum: 0 },
     isActive: { type: "boolean" },
-    roomTypeIds: { type: "array", uniqueItems: true, items: uuidSchema },
+    roomTypeIds: { type: "array", minItems: 1, uniqueItems: true, items: uuidSchema },
     rules: {
       type: "array",
       minItems: 1,

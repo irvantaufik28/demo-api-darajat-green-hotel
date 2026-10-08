@@ -1,4 +1,4 @@
-import { primaryKey, uuid } from "drizzle-orm/pg-core";
+import { primaryKey, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { cancellationPolicies } from "./cancellation_policies.schema.js";
 import { roomTypes } from "./room_types.schema.js";
 
@@ -14,5 +14,8 @@ export const cancellationPolicyRoomTypes = appSchema.table(
       .notNull()
       .references(() => roomTypes.id),
   },
-  (table) => [primaryKey({ columns: [table.policyId, table.roomTypeId] })],
+  (table) => [
+    primaryKey({ columns: [table.policyId, table.roomTypeId] }),
+    uniqueIndex("cancellation_policy_room_types_room_type_uq").on(table.roomTypeId),
+  ],
 );

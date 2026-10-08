@@ -1,8 +1,9 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import type { Database } from "../../../plugins/database.js";
 import { cancellationPolicies } from "../../../db/schema/cancellation_policies.schema.js";
 import { cancellationPolicyRoomTypes } from "../../../db/schema/cancellation_policy_room_types.schema.js";
 import { cancellationRules } from "../../../db/schema/cancellation_rules.schema.js";
+import { campaigns } from "../../../db/schema/campaigns.schema.js";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { roomTypes } from "../../../db/schema/room_types.schema.js";
 import type { CancellationPolicyBody } from "../schemas/cancellation-policies.schema.js";
@@ -53,6 +54,9 @@ export async function validateCancellationPolicy(db: Database, body: Cancellatio
   if (new Set(body.roomTypeIds).size !== body.roomTypeIds.length) {
     throw new CancellationPolicyInputError("Room types must be unique");
   }
+  if (body.roomTypeIds.length === 0) {
+    throw new CancellationPolicyInputError("Select at least one room type");
+  }
   const [policyType] = await db
     .select({ name: masterItems.name })
     .from(masterItems)
@@ -96,6 +100,25 @@ export async function replaceCancellationPolicyRelations(
   policyId: string,
   body: CancellationPolicyBody,
 ) {
+  const previousOwners = await tx
+    .select({ policyId: cancellationPolicyRoomTypes.policyId })
+    .from(cancellationPolicyRoomTypes)
+    .where(
+      and(
+        inArray(cancellationPolicyRoomTypes.roomTypeId, body.roomTypeIds),
+        ne(cancellationPolicyRoomTypes.policyId, policyId),
+      ),
+    );
+  if (previousOwners.length) {
+    await tx
+      .delete(cancellationPolicyRoomTypes)
+      .where(
+        and(
+          inArray(cancellationPolicyRoomTypes.roomTypeId, body.roomTypeIds),
+          ne(cancellationPolicyRoomTypes.policyId, policyId),
+        ),
+      );
+  }
   await tx.delete(cancellationRules).where(eq(cancellationRules.policyId, policyId));
   await tx
     .delete(cancellationPolicyRoomTypes)
@@ -115,6 +138,44 @@ export async function replaceCancellationPolicyRelations(
       .insert(cancellationPolicyRoomTypes)
       .values(body.roomTypeIds.map((roomTypeId) => ({ policyId, roomTypeId })));
   }
+  for (const oldPolicyId of new Set(previousOwners.map((owner) => owner.policyId))) {
+    const remaining = await tx
+      .select({ policyId: cancellationPolicyRoomTypes.policyId })
+      .from(cancellationPolicyRoomTypes)
+      .where(eq(cancellationPolicyRoomTypes.policyId, oldPolicyId))
+      .limit(1);
+    if (remaining.length) continue;
+    const linkedCampaign = await tx
+      .select({ id: campaigns.id })
+      .from(campaigns)
+      .where(eq(campaigns.cancellationPolicyId, oldPolicyId))
+      .limit(1);
+    if (linkedCampaign.length) {
+      throw new CancellationPolicyInputError(
+        "Remove the existing policy from its campaign before replacing it",
+      );
+    }
+    await deleteCancellationPolicy(tx, oldPolicyId);
+  }
+}
+
+export async function deleteCancellationPolicy(tx: Transaction, policyId: string) {
+  const linkedCampaign = await tx
+    .select({ id: campaigns.id })
+    .from(campaigns)
+    .where(eq(campaigns.cancellationPolicyId, policyId))
+    .limit(1);
+  if (linkedCampaign.length) {
+    throw new CancellationPolicyInputError(
+      "Remove this policy from its campaign before deleting it",
+    );
+  }
+  // Reservation history keeps the original ID and immutable policy snapshot.
+  const [deleted] = await tx
+    .delete(cancellationPolicies)
+    .where(eq(cancellationPolicies.id, policyId))
+    .returning({ id: cancellationPolicies.id });
+  return Boolean(deleted);
 }
 
 export async function getCancellationPolicyDetail(db: Database, id: string) {

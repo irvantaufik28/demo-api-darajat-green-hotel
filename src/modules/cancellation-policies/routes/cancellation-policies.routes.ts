@@ -8,6 +8,7 @@ import { databaseErrorCode } from "../../master/master.shared.js";
 import {
   cancellationPolicyValues,
   CancellationPolicyInputError,
+  deleteCancellationPolicy,
   getCancellationPolicyDetail,
   replaceCancellationPolicyRelations,
   validateCancellationPolicy,
@@ -72,8 +73,7 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
         isActive === undefined ? undefined : eq(cancellationPolicies.isActive, isActive),
         roomTypeId
           ? sql`(
-              not exists (select 1 from ${cancellationPolicyRoomTypes} link where link.policy_id = ${cancellationPolicies.id})
-              or exists (select 1 from ${cancellationPolicyRoomTypes} link where link.policy_id = ${cancellationPolicies.id} and link.room_type_id = ${roomTypeId})
+              exists (select 1 from ${cancellationPolicyRoomTypes} link where link.policy_id = ${cancellationPolicies.id} and link.room_type_id = ${roomTypeId})
             )`
           : undefined,
       );
@@ -99,11 +99,17 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
       const ids = items.map((item) => item.id);
       const [rules, linkedRooms] = ids.length
         ? await Promise.all([
-            app.db.select().from(cancellationRules)
+            app.db
+              .select()
+              .from(cancellationRules)
               .where(inArray(cancellationRules.policyId, ids))
               .orderBy(asc(cancellationRules.sortOrder)),
             app.db
-              .select({ policyId: cancellationPolicyRoomTypes.policyId, id: roomTypes.id, name: roomTypes.name })
+              .select({
+                policyId: cancellationPolicyRoomTypes.policyId,
+                id: roomTypes.id,
+                name: roomTypes.name,
+              })
               .from(cancellationPolicyRoomTypes)
               .innerJoin(roomTypes, eq(cancellationPolicyRoomTypes.roomTypeId, roomTypes.id))
               .where(inArray(cancellationPolicyRoomTypes.policyId, ids))
@@ -164,6 +170,12 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
           return reply
             .code(400)
             .send(errorBody("INVALID_REFERENCE", "A referenced item is unavailable"));
+        if (databaseErrorCode(error) === "23505")
+          return reply
+            .code(409)
+            .send(
+              errorBody("ROOM_POLICY_CONFLICT", "A room type already has a cancellation policy"),
+            );
         throw error;
       }
     },
@@ -181,7 +193,10 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
         const changed = await app.db.transaction(async (tx) => {
           const [updated] = await tx
             .update(cancellationPolicies)
-            .set({ ...cancellationPolicyValues(request.body, policyTypeName), updatedAt: new Date() })
+            .set({
+              ...cancellationPolicyValues(request.body, policyTypeName),
+              updatedAt: new Date(),
+            })
             .where(eq(cancellationPolicies.id, request.params.id))
             .returning({ id: cancellationPolicies.id });
           if (!updated) return false;
@@ -197,6 +212,12 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
           return reply
             .code(400)
             .send(errorBody("INVALID_REFERENCE", "A referenced item is unavailable"));
+        if (databaseErrorCode(error) === "23505")
+          return reply
+            .code(409)
+            .send(
+              errorBody("ROOM_POLICY_CONFLICT", "A room type already has a cancellation policy"),
+            );
         throw error;
       }
     },
@@ -224,6 +245,29 @@ export const cancellationPolicyRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!policy) return reply.code(404).send(errorBody("NOT_FOUND", "Policy not found"));
       return { policy };
+    },
+  );
+
+  app.delete<{ Params: IdParams }>(
+    "/:id",
+    {
+      preHandler: app.requirePermission("cancellation_policies.edit"),
+      schema: { params: cancellationPolicyParamsSchema },
+    },
+    async (request, reply) => {
+      try {
+        const deleted = await app.db.transaction((tx) =>
+          deleteCancellationPolicy(tx, request.params.id),
+        );
+        if (!deleted) return reply.code(404).send(errorBody("NOT_FOUND", "Policy not found"));
+        return reply.code(204).send();
+      } catch (error) {
+        if (error instanceof CancellationPolicyInputError)
+          return reply.code(409).send(errorBody("POLICY_IN_USE", error.message));
+        if (databaseErrorCode(error) === "23503")
+          return reply.code(409).send(errorBody("POLICY_IN_USE", "Policy is still referenced; apply the cancellation policy migrations before deleting it"));
+        throw error;
+      }
     },
   );
 };

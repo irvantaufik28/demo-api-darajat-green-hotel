@@ -849,7 +849,6 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                     .where(eq(cancellationPolicyRoomTypes.policyId, policy.id)),
                 ]);
                 if (
-                  applicableRooms.length &&
                   !applicableRooms.some((item) => item.roomTypeId === room.roomTypeId)
                 ) {
                   throw new ReservationInputError(
@@ -906,7 +905,6 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                     .where(eq(cancellationPolicyRoomTypes.policyId, policy.id)),
                 ]);
                 if (
-                  applicableRooms.length &&
                   roomTypeIds.some(
                     (id) => !applicableRooms.some((applicable) => applicable.roomTypeId === id),
                   )

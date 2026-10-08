@@ -13,7 +13,6 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { auditTimestamps, idColumn } from "./columns.js";
-import { cancellationPolicies } from "./cancellation_policies.schema.js";
 import { guests } from "./guests.schema.js";
 import { masterItems } from "./master_items.schema.js";
 import { users } from "./users.schema.js";
@@ -43,7 +42,8 @@ export const reservations = appSchema.table(
     paymentStatus: reservationPaymentStatusEnum("payment_status").notNull().default("unpaid"),
     specialRequests: text("special_requests"),
     internalNotes: text("internal_notes"),
-    cancellationPolicyId: uuid("cancellation_policy_id").references(() => cancellationPolicies.id),
+    // Historical identifier only; cancellation terms are read from the booking snapshot.
+    cancellationPolicyId: uuid("cancellation_policy_id"),
     cancellationPolicySnapshot: jsonb("cancellation_policy_snapshot"),
     promoCodeSnapshot: varchar("promo_code_snapshot", { length: 80 }),
     paymentExpiresAt: timestamp("payment_expires_at", { withTimezone: true }),
