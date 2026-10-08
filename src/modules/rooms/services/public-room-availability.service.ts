@@ -124,6 +124,7 @@ export async function searchPublicRoomAvailability(
   }
 
   const roomCount = query.rooms ?? 1;
+  const today = bookingDateJakarta();
   const [catalog, availability, policies] = await Promise.all([
     listPublicRooms(db),
     readRoomAvailability(
@@ -141,16 +142,16 @@ export async function searchPublicRoomAvailability(
     availability.map(async (option) => {
       const room = catalogById.get(option.roomType.id);
       const reasons = [...option.unavailableReasons];
-    if (option.availableRooms < roomCount && !reasons.includes("insufficient_rooms")) {
-      reasons.push("insufficient_rooms");
-    }
-    if (
-      query.checkInDate === bookingDateJakarta() &&
-      option.assignableRoomUnits.length < roomCount &&
-      !reasons.includes("no_ready_room")
-    ) {
-      reasons.push("insufficient_ready_rooms");
-    }
+      if (option.availableRooms < roomCount && !reasons.includes("insufficient_rooms")) {
+        reasons.push("insufficient_rooms");
+      }
+      if (
+        query.checkInDate === today &&
+        option.assignableRoomUnits.length < roomCount &&
+        !reasons.includes("insufficient_ready_rooms")
+      ) {
+        reasons.push("insufficient_ready_rooms");
+      }
       const guestCapacityFit =
         query.adults === undefined || query.children === undefined
           ? null
@@ -183,6 +184,10 @@ export async function searchPublicRoomAvailability(
         roomType: room ?? option.roomType,
         physicalRooms: option.physicalRooms,
         availableRooms: option.availableRooms,
+        readyRoomCount: option.assignableRoomUnits.length,
+        maxBookableRooms: query.checkInDate === today
+          ? Math.min(option.availableRooms, option.assignableRoomUnits.length)
+          : option.availableRooms,
         requestedRooms: roomCount,
         guestCapacityFit,
         bookable: reasons.length === 0,

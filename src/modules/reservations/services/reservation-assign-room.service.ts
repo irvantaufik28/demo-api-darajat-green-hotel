@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { roomChangeHistory } from "../../../db/schema/room_change_history.schema.js";
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
@@ -9,6 +9,7 @@ import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenan
 import type {
   AssignRoomBody,
   AssignRoomParams,
+  AssignRoomsByTypeBody,
 } from "../schemas/reservations-assign-room.schema.js";
 import { recordReservationEvent } from "./reservation-events.service.js";
 import { bookingDateJakarta } from "./reservations-campaigns.service.js";
@@ -77,6 +78,22 @@ export async function readReservationAssignmentOptions(db: Database, params: Ass
     throw new AssignRoomError("RESERVATION_ROOM_NOT_FOUND", "Reservation room not found", 404);
   }
 
+  const unassignedRooms = await db
+    .select({
+      id: reservationRooms.id,
+      adults: reservationRooms.adults,
+      children: reservationRooms.children,
+    })
+    .from(reservationRooms)
+    .where(
+      and(
+        eq(reservationRooms.reservationId, reservation.id),
+        eq(reservationRooms.roomTypeId, room.roomTypeId),
+        isNull(reservationRooms.roomUnitId),
+      ),
+    )
+    .orderBy(asc(reservationRooms.createdAt), asc(reservationRooms.id));
+
   const [units, overlaps, maintenanceBlocks] = await Promise.all([
     db
       .select({ unit: roomUnits, floorName: masterItems.name })
@@ -119,6 +136,7 @@ export async function readReservationAssignmentOptions(db: Database, params: Ass
       roomTypeName: room.roomTypeNameSnapshot,
       roomUnitId: room.roomUnitId,
     },
+    rooms: unassignedRooms,
     options: units.map(({ unit, floorName }) => {
       const isCurrent = unit.id === room.roomUnitId;
       const unavailableReasons = isCurrent
@@ -143,6 +161,97 @@ export async function readReservationAssignmentOptions(db: Database, params: Ass
         unavailableReasons,
       };
     }),
+  };
+}
+
+export async function assignReservationRoomsByType(
+  tx: Transaction,
+  params: AssignRoomParams,
+  body: AssignRoomsByTypeBody,
+  actorUserId: string,
+) {
+  const [reservation] = await tx
+    .select()
+    .from(reservations)
+    .where(eq(reservations.id, params.id))
+    .for("update")
+    .limit(1);
+  if (!reservation) {
+    throw new AssignRoomError("RESERVATION_NOT_FOUND", "Reservation not found", 404);
+  }
+  if (!["pending", "confirmed"].includes(reservation.reservationStatus)) {
+    throw new AssignRoomError(
+      "ASSIGNMENT_NOT_ALLOWED",
+      "Room assignment is only available before check-in",
+    );
+  }
+  if (reservation.version !== body.expectedVersion) {
+    throw new AssignRoomError(
+      "VERSION_CONFLICT",
+      "Reservation has changed; reload its details before assigning rooms",
+    );
+  }
+
+  const [anchor] = await tx
+    .select({ roomTypeId: reservationRooms.roomTypeId, roomUnitId: reservationRooms.roomUnitId })
+    .from(reservationRooms)
+    .where(
+      and(
+        eq(reservationRooms.id, params.roomId),
+        eq(reservationRooms.reservationId, reservation.id),
+      ),
+    )
+    .limit(1);
+  if (!anchor) {
+    throw new AssignRoomError("RESERVATION_ROOM_NOT_FOUND", "Reservation room not found", 404);
+  }
+  if (anchor.roomUnitId) {
+    throw new AssignRoomError("ASSIGNMENT_NOT_ALLOWED", "Selected reservation room is already assigned");
+  }
+
+  const unassignedRooms = await tx
+    .select({ id: reservationRooms.id })
+    .from(reservationRooms)
+    .where(
+      and(
+        eq(reservationRooms.reservationId, reservation.id),
+        eq(reservationRooms.roomTypeId, anchor.roomTypeId),
+        isNull(reservationRooms.roomUnitId),
+      ),
+    )
+    .orderBy(asc(reservationRooms.createdAt), asc(reservationRooms.id));
+  const expectedRoomIds = new Set(unassignedRooms.map((room) => room.id));
+  const assignments = new Map(body.assignments.map((item) => [item.reservationRoomId, item.roomUnitId]));
+  if (
+    assignments.size !== body.assignments.length ||
+    assignments.size !== expectedRoomIds.size ||
+    [...assignments.keys()].some((id) => !expectedRoomIds.has(id))
+  ) {
+    throw new AssignRoomError(
+      "INVALID_ASSIGNMENTS",
+      "Assign every unassigned room of this room type exactly once",
+    );
+  }
+  if (new Set(assignments.values()).size !== assignments.size) {
+    throw new AssignRoomError("DUPLICATE_ROOM_UNIT", "Each reservation room needs a different room number");
+  }
+
+  let version = reservation.version;
+  const rooms = [];
+  for (const room of unassignedRooms) {
+    const result = await assignReservationRoom(
+      tx,
+      { id: reservation.id, roomId: room.id },
+      { roomUnitId: assignments.get(room.id)!, expectedVersion: version },
+      actorUserId,
+    );
+    version = result.reservation.version;
+    rooms.push(result.room);
+  }
+  return {
+    changed: true,
+    reservation: { id: reservation.id, bookingCode: reservation.bookingCode, version },
+    rooms,
   };
 }
 

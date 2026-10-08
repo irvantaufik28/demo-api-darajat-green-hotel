@@ -72,15 +72,31 @@ export async function quotePublicRooms(db: Database | Transaction, body: PublicR
   const byType = new Map(options.map((option) => [option.roomType.id, option]));
   for (const [roomTypeId, quantity] of requested) {
     const option = byType.get(roomTypeId);
-    if (
-      !option ||
-      !option.bookable ||
-      option.availableRooms < quantity ||
-      (checkInDate === today && option.assignableRoomUnits.length < quantity)
-    ) {
+    if (!option) {
       throw new PublicRoomQuoteError(
         "ROOM_UNAVAILABLE",
         `Room type ${roomTypeId} is unavailable`,
+        409,
+      );
+    }
+    if (option.availableRooms < quantity) {
+      throw new PublicRoomQuoteError(
+        "ROOM_UNAVAILABLE",
+        `Only ${option.availableRooms} rooms remain for room type ${roomTypeId}; ${quantity} requested`,
+        409,
+      );
+    }
+    if (checkInDate === today && option.assignableRoomUnits.length < quantity) {
+      throw new PublicRoomQuoteError(
+        "ROOM_UNAVAILABLE",
+        `Only ${option.assignableRoomUnits.length} ready rooms remain for room type ${roomTypeId} today; ${quantity} requested`,
+        409,
+      );
+    }
+    if (!option.bookable) {
+      throw new PublicRoomQuoteError(
+        "ROOM_UNAVAILABLE",
+        `Room type ${roomTypeId} is unavailable: ${option.unavailableReasons.join(", ")}`,
         409,
       );
     }
