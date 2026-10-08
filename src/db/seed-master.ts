@@ -46,6 +46,21 @@ const categories: MasterCategory[] = [
   { category: "cancellation_policy_types", names: ["Flexible", "Non-refundable", "Custom"] },
 ];
 
+const amenityIconKeys: Record<string, string> = {
+  air_conditioning: "snowflake",
+  mountain_view: "mountain",
+  fireplace: "flame",
+  hot_water: "flame",
+  shower: "shower-head",
+  bathtub: "bath",
+  wifi: "wifi",
+  television: "tv",
+  cable_channels: "tv",
+  smart_tv_streaming: "tv",
+  kettle: "coffee",
+  tea_coffee_set: "coffee",
+};
+
 // Child capacity can match adult capacity; selection belongs to each room type.
 const occupancyCombinations = Array.from({ length: 15 }, (_, index) => index + 1).flatMap(
   (adults) => Array.from({ length: adults + 1 }, (_, children) => [adults, children] as const),
@@ -72,7 +87,7 @@ async function main(): Promise<void> {
           const code = codeFor(name);
           await tx
             .insert(masterItems)
-            .values({ category, code, name, sortOrder })
+            .values({ category, code, name, sortOrder, iconKey: category === "amenities" ? amenityIconKeys[code] ?? null : null })
             .onConflictDoUpdate({
               target: [masterItems.category, masterItems.code],
               set: { name, sortOrder },

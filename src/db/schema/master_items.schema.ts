@@ -10,6 +10,7 @@ export const masterItems = appSchema.table(
     category: varchar("category", { length: 60 }).notNull(),
     code: varchar("code", { length: 80 }).notNull(),
     name: varchar("name", { length: 160 }).notNull(),
+    iconKey: varchar("icon_key", { length: 60 }),
     sortOrder: integer("sort_order").notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
     ...auditTimestamps(),

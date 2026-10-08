@@ -1,6 +1,7 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
+import { masterIconKeys } from "../master-icons.js";
 import {
   categorySlugs,
   codeForName,
@@ -13,8 +14,8 @@ import {
 
 type CategoryParams = { category: MasterCategorySlug };
 type ItemParams = CategoryParams & { id: string };
-type CreateBody = { name: string; sortOrder?: number };
-type UpdateBody = { name?: string; sortOrder?: number; isActive?: boolean };
+type CreateBody = { name: string; iconKey?: string | null; sortOrder?: number };
+type UpdateBody = { name?: string; iconKey?: string | null; sortOrder?: number; isActive?: boolean };
 
 const categoryParamsSchema = {
   type: "object",
@@ -35,6 +36,7 @@ const itemFields = {
   id: masterItems.id,
   code: masterItems.code,
   name: masterItems.name,
+  iconKey: masterItems.iconKey,
   sortOrder: masterItems.sortOrder,
   isActive: masterItems.isActive,
 };
@@ -73,6 +75,7 @@ export const masterItemRoutes: FastifyPluginAsync = async (app) => {
           additionalProperties: false,
           properties: {
             name: { type: "string", minLength: 1, maxLength: 160 },
+            iconKey: { anyOf: [{ type: "string", enum: masterIconKeys }, { type: "null" }] },
             sortOrder: sortOrderSchema,
           },
         },
@@ -92,6 +95,7 @@ export const masterItemRoutes: FastifyPluginAsync = async (app) => {
             category: masterCategories[request.params.category],
             code,
             name,
+            iconKey: request.body.iconKey ?? null,
             sortOrder: request.body.sortOrder ?? 0,
           })
           .returning(itemFields);
@@ -117,6 +121,7 @@ export const masterItemRoutes: FastifyPluginAsync = async (app) => {
           additionalProperties: false,
           properties: {
             name: { type: "string", minLength: 1, maxLength: 160 },
+            iconKey: { anyOf: [{ type: "string", enum: masterIconKeys }, { type: "null" }] },
             sortOrder: sortOrderSchema,
             isActive: { type: "boolean" },
           },
@@ -149,6 +154,7 @@ export const masterItemRoutes: FastifyPluginAsync = async (app) => {
         .update(masterItems)
         .set({
           ...(name !== undefined ? { name } : {}),
+          ...(request.body.iconKey !== undefined ? { iconKey: request.body.iconKey } : {}),
           ...(request.body.sortOrder !== undefined ? { sortOrder: request.body.sortOrder } : {}),
           ...(request.body.isActive !== undefined ? { isActive: request.body.isActive } : {}),
           updatedAt: new Date(),

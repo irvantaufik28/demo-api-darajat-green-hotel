@@ -35,6 +35,7 @@ export async function listPublicRooms(db: Database, slug?: string) {
         roomTypeId: roomTypeAmenities.roomTypeId,
         id: masterItems.id,
         name: masterItems.name,
+        iconKey: masterItems.iconKey,
       })
       .from(roomTypeAmenities)
       .innerJoin(masterItems, eq(roomTypeAmenities.amenityId, masterItems.id))
@@ -87,7 +88,7 @@ export async function listPublicRooms(db: Database, slug?: string) {
       })),
     amenities: amenities
       .filter((item) => item.roomTypeId === type.id)
-      .map(({ id, name }) => ({ id, name })),
+      .map(({ id, name, iconKey }) => ({ id, name, iconKey })),
     capacityPatterns: capacities
       .filter((item) => item.roomTypeId === type.id)
       .map(({ adults, children, extraBeds }) => ({ adults, children, extraBeds })),
