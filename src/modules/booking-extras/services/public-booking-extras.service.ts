@@ -60,6 +60,7 @@ export async function listPublicBookingExtras(db: Database, query: PublicBooking
         name: experiences.name,
         description: experiences.description,
         imageUrl: experiences.imageUrl,
+        coverImageUrl: experiences.coverImageUrl,
         maxQuantity: experiences.maxQuantity,
         categoryId: masterItems.id,
         categoryCode: masterItems.code,
@@ -91,6 +92,7 @@ export async function listPublicBookingExtras(db: Database, query: PublicBooking
           experienceId: experienceVariants.experienceId,
           name: experienceVariants.subName,
           description: experienceVariants.description,
+          imageUrl: experienceVariants.imageUrl,
           price: experienceVariants.price,
         })
         .from(experienceVariants)
@@ -127,6 +129,7 @@ export async function listPublicBookingExtras(db: Database, query: PublicBooking
         name: experience.name,
         description: experience.description,
         imageUrl: experience.imageUrl,
+        coverImageUrl: experience.coverImageUrl,
         maxQuantity: experience.maxQuantity,
         category: {
           id: experience.categoryId,

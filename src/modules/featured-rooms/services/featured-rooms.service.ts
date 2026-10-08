@@ -80,6 +80,25 @@ export async function listFeaturedRooms(app: FastifyInstance, publicOnly: boolea
   }));
 }
 
+export async function listSelectableRoomTypes(app: FastifyInstance) {
+  const rows = await app.db
+    .select({ roomType: roomTypes, coverImage: roomTypeImages })
+    .from(roomTypes)
+    .leftJoin(
+      roomTypeImages,
+      and(eq(roomTypeImages.roomTypeId, roomTypes.id), eq(roomTypeImages.isCover, true)),
+    )
+    .where(eq(roomTypes.isActive, true))
+    .orderBy(asc(roomTypes.name));
+
+  return rows.map(({ roomType, coverImage }) => ({
+    id: roomType.id,
+    name: roomType.name,
+    description: roomType.description,
+    coverImage: coverImage ? { url: coverImage.url, altText: coverImage.altText } : null,
+  }));
+}
+
 export async function saveFeaturedRooms(app: FastifyInstance, body: FeaturedRoomsBody) {
   await app.db.transaction(async (tx) => {
     await tx.delete(featuredRoomTypes);

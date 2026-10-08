@@ -13,6 +13,7 @@ export const experienceVariants = appSchema.table(
       .references(() => experiences.id, { onDelete: "cascade" }),
     subName: varchar("sub_name", { length: 160 }).notNull(),
     description: text("description"),
+    imageUrl: text("image_url"),
     price: rupiah("price").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
     ...auditTimestamps(),

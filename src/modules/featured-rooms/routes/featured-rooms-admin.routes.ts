@@ -5,11 +5,19 @@ import {
   featuredRoomsBodySchema,
   type FeaturedRoomsBody,
 } from "../schemas/featured-rooms.schema.js";
-import { listFeaturedRooms, saveFeaturedRooms } from "../services/featured-rooms.service.js";
+import {
+  listFeaturedRooms,
+  listSelectableRoomTypes,
+  saveFeaturedRooms,
+} from "../services/featured-rooms.service.js";
 
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
 
 export const featuredRoomsAdminRoutes: FastifyPluginAsync = async (app) => {
+  app.get("/room-types", { preHandler: app.requirePermission("web_settings.manage") }, async () => ({
+    items: await listSelectableRoomTypes(app),
+  }));
+
   app.get("/", { preHandler: app.requirePermission("web_settings.manage") }, async () => ({
     items: await listFeaturedRooms(app, false),
   }));

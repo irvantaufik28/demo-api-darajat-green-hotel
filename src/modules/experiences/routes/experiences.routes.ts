@@ -25,6 +25,7 @@ function validateBody(body: ExperienceBody) {
   const variants = body.variants.map((variant) => ({
     subName: variant.subName.trim(),
     description: variant.description?.trim() || null,
+    imageUrl: variant.imageUrl?.trim() || null,
     price: variant.price,
   }));
   if (!body.name.trim() || !body.code.trim() || !body.slug.trim()) {
@@ -94,6 +95,7 @@ function values(body: ExperienceBody, minPrice: number) {
     price: minPrice,
     maxQuantity: body.maxQuantity,
     imageUrl: body.imageUrl?.trim() || null,
+    coverImageUrl: body.coverImageUrl?.trim() || null,
     isActive: body.isActive,
   };
 }

@@ -19,6 +19,7 @@ export const experiences = appSchema.table(
     price: rupiah("price").notNull().default(0),
     maxQuantity: smallint("max_quantity").notNull().default(1),
     imageUrl: text("image_url"),
+    coverImageUrl: text("cover_image_url"),
     isActive: boolean("is_active").notNull().default(true),
     ...auditTimestamps(),
   },
