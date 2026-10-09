@@ -16,17 +16,20 @@ export type LateCheckOutInput = {
 };
 
 export class CheckOutTimeError extends Error {
-  constructor(readonly code: string, message: string) {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
     super(message);
   }
 }
 
-export async function getCheckOutClock(
-  db: QueryDatabase,
-  now = new Date(),
-) {
+export async function getCheckOutClock(db: QueryDatabase, now = new Date()) {
   const [settings] = await db
-    .select({ checkOutTime: reservationSettings.checkOutTime })
+    .select({
+      checkOutTime: reservationSettings.checkOutTime,
+      allowOutstandingCheckOut: reservationSettings.allowOutstandingCheckOut,
+    })
     .from(reservationSettings)
     .where(eq(reservationSettings.id, "00000000-0000-4000-8000-000000000001"))
     .limit(1);
@@ -44,12 +47,15 @@ export async function getCheckOutClock(
   const value = (type: string) => parts.find((part) => part.type === type)!.value;
   const serverDate = `${value("year")}-${value("month")}-${value("day")}`;
   const serverTime = `${value("hour")}:${value("minute")}`;
-  const serverSeconds = Number(value("hour")) * 3600 + Number(value("minute")) * 60 + Number(value("second"));
-  const standardSeconds = Number(standardCheckOutTime.slice(0, 2)) * 3600 + Number(standardCheckOutTime.slice(3, 5)) * 60;
+  const serverSeconds =
+    Number(value("hour")) * 3600 + Number(value("minute")) * 60 + Number(value("second"));
+  const standardSeconds =
+    Number(standardCheckOutTime.slice(0, 2)) * 3600 + Number(standardCheckOutTime.slice(3, 5)) * 60;
   return {
     serverDate,
     serverTime,
     standardCheckOutTime,
+    allowOutstandingCheckOut: settings?.allowOutstandingCheckOut ?? true,
     afterCheckOutTime: serverSeconds > standardSeconds,
     minutesPastCheckOutTime: Math.floor(Math.max(0, serverSeconds - standardSeconds) / 60),
   };
@@ -63,13 +69,21 @@ export async function getCheckOutTimeContext(
   now = new Date(),
 ) {
   const clock = await getCheckOutClock(db, now);
-  const { serverDate, serverTime, standardCheckOutTime } = clock;
-  const kind = serverDate < checkOutDate
-    ? "early_departure"
-    : serverDate > checkOutDate || clock.afterCheckOutTime
-      ? "late_checkout"
-      : "normal";
-  return { checkOutDate, serverDate, serverTime, standardCheckOutTime, kind } as const;
+  const { serverDate, serverTime, standardCheckOutTime, allowOutstandingCheckOut } = clock;
+  const kind =
+    serverDate < checkOutDate
+      ? "early_departure"
+      : serverDate > checkOutDate || clock.afterCheckOutTime
+        ? "late_checkout"
+        : "normal";
+  return {
+    checkOutDate,
+    serverDate,
+    serverTime,
+    standardCheckOutTime,
+    allowOutstandingCheckOut,
+    kind,
+  } as const;
 }
 
 export async function addLateCheckOutCharge(
@@ -84,49 +98,67 @@ export async function addLateCheckOutCharge(
   const { reservationId, actorUserId, lateCheckOut } = input;
   const amount = lateCheckOut.chargeAmount;
   if (!Number.isSafeInteger(amount) || amount < 0) {
-    throw new CheckOutTimeError("INVALID_LATE_CHECKOUT_CHARGE", "Enter a valid late checkout charge");
+    throw new CheckOutTimeError(
+      "INVALID_LATE_CHECKOUT_CHARGE",
+      "Enter a valid late checkout charge",
+    );
   }
   if (amount === 0) return { chargeId: null, paymentId: null };
 
   if (lateCheckOut.paymentTiming === "now") {
     if (!lateCheckOut.paymentMethodId) {
-      throw new CheckOutTimeError("LATE_CHECKOUT_PAYMENT_METHOD_REQUIRED", "Select a payment method for the late checkout charge");
+      throw new CheckOutTimeError(
+        "LATE_CHECKOUT_PAYMENT_METHOD_REQUIRED",
+        "Select a payment method for the late checkout charge",
+      );
     }
     const [method] = await tx
       .select({ id: masterItems.id })
       .from(masterItems)
-      .where(and(
-        eq(masterItems.id, lateCheckOut.paymentMethodId),
-        eq(masterItems.category, "payment_methods"),
-        eq(masterItems.isActive, true),
-      ))
+      .where(
+        and(
+          eq(masterItems.id, lateCheckOut.paymentMethodId),
+          eq(masterItems.category, "payment_methods"),
+          eq(masterItems.isActive, true),
+        ),
+      )
       .limit(1);
     if (!method) {
-      throw new CheckOutTimeError("INVALID_LATE_CHECKOUT_PAYMENT_METHOD", "Select an active payment method");
+      throw new CheckOutTimeError(
+        "INVALID_LATE_CHECKOUT_PAYMENT_METHOD",
+        "Select an active payment method",
+      );
     }
   }
 
-  const [charge] = await tx.insert(reservationCharges).values({
-    reservationId,
-    kind: "adjustment",
-    description: "Late checkout charge",
-    quantity: "1",
-    unitAmount: amount,
-    amount,
-    serviceDate: input.checkOutDate,
-    createdByUserId: actorUserId,
-  }).returning({ id: reservationCharges.id });
+  const [charge] = await tx
+    .insert(reservationCharges)
+    .values({
+      reservationId,
+      kind: "adjustment",
+      description: "Late checkout charge",
+      quantity: "1",
+      unitAmount: amount,
+      amount,
+      serviceDate: input.checkOutDate,
+      createdByUserId: actorUserId,
+    })
+    .returning({ id: reservationCharges.id });
 
-  const [payment] = lateCheckOut.paymentTiming === "now"
-    ? await tx.insert(payments).values({
-        reservationId,
-        methodId: lateCheckOut.paymentMethodId!,
-        amount,
-        status: "succeeded",
-        paidAt: new Date(),
-        recordedByUserId: actorUserId,
-        notes: "Late checkout charge",
-      }).returning({ id: payments.id })
-    : [];
+  const [payment] =
+    lateCheckOut.paymentTiming === "now"
+      ? await tx
+          .insert(payments)
+          .values({
+            reservationId,
+            methodId: lateCheckOut.paymentMethodId!,
+            amount,
+            status: "succeeded",
+            paidAt: new Date(),
+            recordedByUserId: actorUserId,
+            notes: "Late checkout charge",
+          })
+          .returning({ id: payments.id })
+      : [];
   return { chargeId: charge.id, paymentId: payment?.id ?? null };
 }

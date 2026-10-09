@@ -1,10 +1,11 @@
-import { and, count, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { guests } from "../../../db/schema/guests.schema.js";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { paymentRefunds } from "../../../db/schema/payment_refunds.schema.js";
 import { payments } from "../../../db/schema/payments.schema.js";
 import { reservationCharges } from "../../../db/schema/reservation_charges.schema.js";
+import { reservationDeposits } from "../../../db/schema/reservation_deposits.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 
 type Query = {
@@ -107,6 +108,7 @@ export const paymentListRoutes: FastifyPluginAsync = async (app) => {
             checkOutDate: reservations.checkOutDate,
             reservationStatus: reservations.reservationStatus,
             paymentStatus: reservations.paymentStatus,
+            noShowChargeAmount: reservations.noShowChargeAmount,
             guest: { fullName: guests.fullName, phone: guests.phone },
           })
           .from(reservations)
@@ -126,7 +128,7 @@ export const paymentListRoutes: FastifyPluginAsync = async (app) => {
           .where(inArray(masterItems.category, ["payment_methods", "ota_channels"])),
       ]);
       const ids = rows.map((row) => row.id);
-      const [charges, paymentRows] = ids.length
+      const [charges, paymentRows, depositRows] = ids.length
         ? await Promise.all([
             app.db
               .select({
@@ -146,8 +148,19 @@ export const paymentListRoutes: FastifyPluginAsync = async (app) => {
               .from(payments)
               .where(inArray(payments.reservationId, ids))
               .orderBy(desc(payments.paidAt), desc(payments.createdAt)),
+            app.db
+              .select({
+                reservationId: reservationDeposits.reservationId,
+                balance:
+                  sql<number>`sum(${reservationDeposits.amountHeld} - ${reservationDeposits.amountRefunded} - ${reservationDeposits.amountDeducted})::bigint`.mapWith(
+                    Number,
+                  ),
+              })
+              .from(reservationDeposits)
+              .where(inArray(reservationDeposits.reservationId, ids))
+              .groupBy(reservationDeposits.reservationId),
           ])
-        : [[], []];
+        : [[], [], []];
       const paymentIds = paymentRows.map((row) => row.id);
       const refunds = paymentIds.length
         ? await app.db
@@ -176,6 +189,23 @@ export const paymentListRoutes: FastifyPluginAsync = async (app) => {
               (refund) => ownPaymentIds.has(refund.paymentId) && refund.status === "succeeded",
             )
             .reduce((sum, refund) => sum + refund.amount, 0);
+          const netPaidAmount = Math.max(0, paidAmount - refundedAmount);
+          const depositBalance =
+            depositRows.find((deposit) => deposit.reservationId === row.id)?.balance ?? 0;
+          const noShowPenaltyAmount =
+            row.reservationStatus === "no_show" &&
+            row.source !== "ota" &&
+            !(row.source === "website" && row.paymentStatus !== "paid")
+              ? Math.min(row.noShowChargeAmount ?? netPaidAmount, netPaidAmount)
+              : null;
+          const settlementStatus =
+            row.reservationStatus !== "no_show"
+              ? null
+              : row.source === "ota" || (row.source === "website" && row.paymentStatus !== "paid")
+                ? "manual_review_required"
+                : depositBalance > 0 || netPaidAmount > (noShowPenaltyAmount ?? netPaidAmount)
+                  ? "refund_required"
+                  : "settled";
           const method = succeeded[0]
             ? { id: succeeded[0].methodId, name: names.get(succeeded[0].methodId) ?? "—" }
             : null;
@@ -185,7 +215,11 @@ export const paymentListRoutes: FastifyPluginAsync = async (app) => {
             bookingTotal,
             paidAmount,
             refundedAmount,
-            remainingBalance: Math.max(0, bookingTotal - paidAmount + refundedAmount),
+            remainingBalance:
+              row.reservationStatus === "no_show" ? 0 : Math.max(0, bookingTotal - netPaidAmount),
+            noShowPenaltyAmount,
+            settlementStatus,
+            depositBalance,
             method,
           };
         }),

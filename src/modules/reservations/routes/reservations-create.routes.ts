@@ -24,7 +24,11 @@ import { roomTypeCapacityPatterns } from "../../../db/schema/room_type_capacity_
 import { roomUnits } from "../../../db/schema/room_units.schema.js";
 import { readActiveMaintenanceBlocks } from "../../rooms/services/room-maintenance.service.js";
 import { recordReservationEvent } from "../services/reservation-events.service.js";
-import { addEarlyCheckInCharge, EarlyCheckInError, getEarlyCheckInContext } from "../services/reservation-early-check-in.service.js";
+import {
+  addEarlyCheckInCharge,
+  EarlyCheckInError,
+  getEarlyCheckInContext,
+} from "../services/reservation-early-check-in.service.js";
 import { requestHash } from "../reservation-idempotency.js";
 import {
   calculateReservationTotal,
@@ -79,7 +83,10 @@ function guestAllocationError(input: {
   const children = input.rooms.reduce((sum, room) => sum + room.children, 0);
   return adults === input.totalAdults && children === input.totalChildren
     ? null
-    : errorBody("GUEST_ALLOCATION_MISMATCH", `Room allocation has ${adults} adult(s) and ${children} child(ren); expected ${input.totalAdults} adult(s) and ${input.totalChildren} child(ren)`);
+    : errorBody(
+        "GUEST_ALLOCATION_MISMATCH",
+        `Room allocation has ${adults} adult(s) and ${children} child(ren); expected ${input.totalAdults} adult(s) and ${input.totalChildren} child(ren)`,
+      );
 }
 
 export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
@@ -237,7 +244,12 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
         ) {
           return reply
             .code(400)
-            .send(errorBody("INVALID_CAPACITY", `Room ${roomIndex + 1}: guest count or extra beds are not allowed for this room type`));
+            .send(
+              errorBody(
+                "INVALID_CAPACITY",
+                `Room ${roomIndex + 1}: guest count or extra beds are not allowed for this room type`,
+              ),
+            );
         }
       }
       try {
@@ -577,7 +589,12 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             : [];
           const assignedById = new Map(assignedUnits.map((unit) => [unit.id, unit]));
           const maintenanceBlocks = assignedUnitIds.length
-            ? await readActiveMaintenanceBlocks(tx, body.checkInDate, body.checkOutDate, roomTypeIds)
+            ? await readActiveMaintenanceBlocks(
+                tx,
+                body.checkInDate,
+                body.checkOutDate,
+                roomTypeIds,
+              )
             : [];
           const blockedUnitIds = new Set(maintenanceBlocks.map((block) => block.roomUnitId));
           for (const room of body.rooms) {
@@ -848,9 +865,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                     .from(cancellationPolicyRoomTypes)
                     .where(eq(cancellationPolicyRoomTypes.policyId, policy.id)),
                 ]);
-                if (
-                  !applicableRooms.some((item) => item.roomTypeId === room.roomTypeId)
-                ) {
+                if (!applicableRooms.some((item) => item.roomTypeId === room.roomTypeId)) {
                   throw new ReservationInputError(
                     "INVALID_POLICY",
                     `Cancellation policy does not apply to room ${roomIndex + 1}`,
@@ -948,16 +963,45 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
             ? await getEarlyCheckInContext(tx, body.checkInDate)
             : null;
           if (earlyContext?.required && body.earlyCheckIn?.acknowledged !== true) {
-            throw new ReservationInputError("EARLY_CHECK_IN_CONFIRMATION_REQUIRED", "Confirm early check-in before the standard check-in time", 409);
+            throw new ReservationInputError(
+              "EARLY_CHECK_IN_CONFIRMATION_REQUIRED",
+              "Confirm early check-in before the standard check-in time",
+              409,
+            );
           }
-          if (earlyContext?.required && body.earlyCheckIn && body.earlyCheckIn.paymentTiming === "now" && body.earlyCheckIn.chargeAmount > 0 && !body.earlyCheckIn.paymentMethodId) {
-            throw new ReservationInputError("INVALID_EARLY_CHECK_IN", "Early check-in details or payment method are invalid");
+          if (
+            earlyContext?.required &&
+            body.earlyCheckIn &&
+            body.earlyCheckIn.paymentTiming === "now" &&
+            body.earlyCheckIn.chargeAmount > 0 &&
+            !body.earlyCheckIn.paymentMethodId
+          ) {
+            throw new ReservationInputError(
+              "INVALID_EARLY_CHECK_IN",
+              "Early check-in details or payment method are invalid",
+            );
           }
           if (body.payment && body.payment.amount > bookingTotal) {
             throw new ReservationInputError("INVALID_PAYMENT", "Payment exceeds the booking total");
           }
           const paidAmount = body.source === "ota" ? bookingTotal : (body.payment?.amount ?? 0);
           const remainingBalance = bookingTotal - paidAmount;
+          const projectedCheckInOutstanding =
+            remainingBalance +
+            (earlyContext?.required && body.earlyCheckIn?.paymentTiming === "later"
+              ? body.earlyCheckIn.chargeAmount
+              : 0);
+          if (
+            body.checkIn &&
+            projectedCheckInOutstanding > 0 &&
+            !earlyContext?.allowOutstandingCheckIn
+          ) {
+            throw new ReservationInputError(
+              "OUTSTANDING_CHECK_IN_DISABLED",
+              "Check-in requires full payment because outstanding check-in is disabled",
+              409,
+            );
+          }
           if (body.checkIn && remainingBalance > 0 && body.acknowledgeOutstanding !== true) {
             throw new ReservationInputError(
               "OUTSTANDING_CONFIRMATION_REQUIRED",
@@ -979,6 +1023,7 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               .insert(guests)
               .values({
                 fullName: body.guest!.fullName.trim(),
+                nik: nullable(body.guest!.nik),
                 phone: nullable(body.guest!.phone),
                 email: nullable(body.guest!.email),
               })
@@ -1179,22 +1224,31 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                 .returning({ id: reservationDeposits.id })
             : [];
 
-          const earlyCharge = earlyContext?.required && body.earlyCheckIn
-            ? await addEarlyCheckInCharge(tx, {
-                reservationId: id,
-                checkInDate: body.checkInDate,
-                actorUserId: request.authUser!.id,
-                earlyCheckIn: body.earlyCheckIn,
-              })
-            : null;
-          const finalBookingTotal = bookingTotal + (earlyContext?.required ? body.earlyCheckIn?.chargeAmount ?? 0 : 0);
-          const finalPaidAmount = paidAmount + (earlyCharge?.paymentId ? body.earlyCheckIn!.chargeAmount : 0);
+          const earlyCharge =
+            earlyContext?.required && body.earlyCheckIn
+              ? await addEarlyCheckInCharge(tx, {
+                  reservationId: id,
+                  checkInDate: body.checkInDate,
+                  actorUserId: request.authUser!.id,
+                  earlyCheckIn: body.earlyCheckIn,
+                })
+              : null;
+          const finalBookingTotal =
+            bookingTotal + (earlyContext?.required ? (body.earlyCheckIn?.chargeAmount ?? 0) : 0);
+          const finalPaidAmount =
+            paidAmount + (earlyCharge?.paymentId ? body.earlyCheckIn!.chargeAmount : 0);
           const finalRemainingBalance = finalBookingTotal - finalPaidAmount;
-          const finalPaymentStatus = finalPaidAmount >= finalBookingTotal
-            ? "paid"
-            : finalPaidAmount > 0 ? "partial" : "unpaid";
+          const finalPaymentStatus =
+            finalPaidAmount >= finalBookingTotal
+              ? "paid"
+              : finalPaidAmount > 0
+                ? "partial"
+                : "unpaid";
           if (finalPaymentStatus !== paymentStatus) {
-            await tx.update(reservations).set({ paymentStatus: finalPaymentStatus }).where(eq(reservations.id, id));
+            await tx
+              .update(reservations)
+              .set({ paymentStatus: finalPaymentStatus })
+              .where(eq(reservations.id, id));
           }
 
           const eventBaseTime = new Date();
@@ -1261,7 +1315,10 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               paymentStatusBefore: paymentStatus,
               paymentStatusAfter: finalPaymentStatus,
               referenceId: earlyCharge.chargeId,
-              details: { amount: body.earlyCheckIn!.chargeAmount, paymentTiming: body.earlyCheckIn!.paymentTiming },
+              details: {
+                amount: body.earlyCheckIn!.chargeAmount,
+                paymentTiming: body.earlyCheckIn!.paymentTiming,
+              },
             });
           }
           if (earlyCharge?.paymentId) {
@@ -1276,7 +1333,11 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
               paymentStatusBefore: paymentStatus,
               paymentStatusAfter: finalPaymentStatus,
               referenceId: earlyCharge.paymentId,
-              details: { amount: body.earlyCheckIn!.chargeAmount, methodId: body.earlyCheckIn!.paymentMethodId, source: "early_check_in" },
+              details: {
+                amount: body.earlyCheckIn!.chargeAmount,
+                methodId: body.earlyCheckIn!.paymentMethodId,
+                source: "early_check_in",
+              },
             });
           }
           if (body.confirm) {
@@ -1312,14 +1373,16 @@ export const reservationCreateRoutes: FastifyPluginAsync = async (app) => {
                 rooms: createdRoomAssignments,
                 remainingBalance: finalRemainingBalance,
                 outstandingAcknowledged: remainingBalance > 0,
-                earlyCheckIn: earlyContext?.required ? {
-                  standardCheckInTime: earlyContext.standardCheckInTime,
-                  serverTime: earlyContext.serverTime,
-                  chargeAmount: body.earlyCheckIn?.chargeAmount ?? 0,
-                  paymentTiming: body.earlyCheckIn?.paymentTiming ?? "later",
-                  chargeId: earlyCharge?.chargeId ?? null,
-                  paymentId: earlyCharge?.paymentId ?? null,
-                } : null,
+                earlyCheckIn: earlyContext?.required
+                  ? {
+                      standardCheckInTime: earlyContext.standardCheckInTime,
+                      serverTime: earlyContext.serverTime,
+                      chargeAmount: body.earlyCheckIn?.chargeAmount ?? 0,
+                      paymentTiming: body.earlyCheckIn?.paymentTiming ?? "later",
+                      chargeId: earlyCharge?.chargeId ?? null,
+                      paymentId: earlyCharge?.paymentId ?? null,
+                    }
+                  : null,
               },
             });
           }

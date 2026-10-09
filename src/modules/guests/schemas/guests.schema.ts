@@ -2,6 +2,7 @@ import { uuidSchema } from "../../master/master.shared.js";
 
 export type GuestUpdateBody = {
   fullName: string;
+  nik?: string | null;
   phone?: string | null;
   email?: string | null;
   nationality?: string | null;
@@ -26,6 +27,7 @@ export const guestUpdateBodySchema = {
   required: ["fullName", "status"],
   properties: {
     fullName: { type: "string", minLength: 1, maxLength: 160 },
+    nik: nullableString(32),
     phone: nullableString(40),
     email: nullableString(255),
     nationality: nullableString(255),

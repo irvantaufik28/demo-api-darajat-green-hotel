@@ -4,12 +4,16 @@ import type { FastifyPluginAsync } from "fastify";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { paymentRefunds } from "../../../db/schema/payment_refunds.schema.js";
 import { payments } from "../../../db/schema/payments.schema.js";
+import { reservationDeposits } from "../../../db/schema/reservation_deposits.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
 import { uuidSchema } from "../../master/master.shared.js";
-import { calculateCancellationSettlement } from "../services/reservation-cancellation-settlement.service.js";
 import { recordReservationEvent } from "../services/reservation-events.service.js";
 import { readReservationFinancials } from "../services/reservation-financials.service.js";
 import { getNoRefundDecision } from "../services/reservation-no-refund.service.js";
+import {
+  calculateRefundSettlement,
+  refundAllowed,
+} from "../services/reservation-refund-settlement.service.js";
 import { paymentStatusAfterCancellationRefund } from "../services/reservation-refund-status.service.js";
 
 type RefundParams = { id: string };
@@ -26,6 +30,12 @@ const paramsSchema = {
   type: "object",
   required: ["id"],
   properties: { id: uuidSchema },
+} as const;
+
+const depositRefundParamsSchema = {
+  type: "object",
+  required: ["id", "depositId"],
+  properties: { id: uuidSchema, depositId: uuidSchema },
 } as const;
 
 const bodySchema = {
@@ -53,6 +63,120 @@ class RefundInputError extends Error {
 }
 
 export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
+  app.post<{
+    Params: RefundParams & { depositId: string };
+    Body: { reason: string; reference: string };
+  }>(
+    "/:id/deposits/:depositId/refund",
+    {
+      preHandler: app.requirePermission("payments.refund"),
+      schema: {
+        params: depositRefundParamsSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["reason", "reference"],
+          properties: {
+            reason: { type: "string", minLength: 1, maxLength: 2000 },
+            reference: { type: "string", minLength: 1, maxLength: 160 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const reason = request.body.reason.trim();
+      const reference = request.body.reference.trim();
+      if (!reason || !reference) {
+        return reply.code(400).send({
+          error: {
+            code: "INVALID_DEPOSIT_REFUND",
+            message: "Reason and refund reference are required",
+          },
+        });
+      }
+
+      try {
+        const result = await app.db.transaction(async (tx) => {
+          const [reservation] = await tx
+            .select()
+            .from(reservations)
+            .where(eq(reservations.id, request.params.id))
+            .for("update")
+            .limit(1);
+          if (!reservation) {
+            throw new RefundInputError("RESERVATION_NOT_FOUND", "Reservation not found", 404);
+          }
+          if (reservation.reservationStatus !== "no_show") {
+            throw new RefundInputError(
+              "DEPOSIT_REFUND_NOT_ALLOWED",
+              "No-show deposit refunds require a no-show reservation",
+            );
+          }
+          const [deposit] = await tx
+            .select()
+            .from(reservationDeposits)
+            .where(
+              and(
+                eq(reservationDeposits.id, request.params.depositId),
+                eq(reservationDeposits.reservationId, reservation.id),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!deposit) {
+            throw new RefundInputError("DEPOSIT_NOT_FOUND", "Deposit not found", 404);
+          }
+          const amount = deposit.amountHeld - deposit.amountRefunded - deposit.amountDeducted;
+          if (amount <= 0) {
+            throw new RefundInputError(
+              "DEPOSIT_ALREADY_SETTLED",
+              "Deposit has already been settled",
+            );
+          }
+          const occurredAt = new Date();
+          await tx
+            .update(reservationDeposits)
+            .set({
+              amountRefunded: deposit.amountRefunded + amount,
+              status: "refunded",
+              notes: [deposit.notes, `Refund ${reference}: ${reason}`].filter(Boolean).join("\n"),
+              updatedAt: occurredAt,
+            })
+            .where(eq(reservationDeposits.id, deposit.id));
+          await recordReservationEvent(tx, {
+            reservationId: reservation.id,
+            eventType: "deposit.settled",
+            actorType: "user",
+            actorUserId: request.authUser!.id,
+            occurredAt,
+            reservationStatusBefore: "no_show",
+            reservationStatusAfter: "no_show",
+            paymentStatusBefore: reservation.paymentStatus,
+            paymentStatusAfter: reservation.paymentStatus,
+            referenceId: deposit.id,
+            details: {
+              refundAmount: amount,
+              deductionAmount: 0,
+              remaining: 0,
+              reason,
+              refundReference: reference,
+              source: "no_show_settlement",
+            },
+          });
+          return { depositId: deposit.id, amount, status: "refunded", reference };
+        });
+        return reply.code(201).send(result);
+      } catch (error) {
+        if (error instanceof RefundInputError) {
+          return reply
+            .code(error.statusCode)
+            .send({ error: { code: error.code, message: error.message } });
+        }
+        throw error;
+      }
+    },
+  );
+
   app.get<{ Params: RefundParams }>(
     "/:id/refund-eligibility",
     {
@@ -70,13 +194,16 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           error: { code: "RESERVATION_NOT_FOUND", message: "Reservation not found" },
         });
       }
-      if (reservation.reservationStatus !== "cancelled") {
+      if (!refundAllowed(reservation)) {
         return reply.code(409).send({
-          error: { code: "REFUND_NOT_ALLOWED", message: "Reservation must be cancelled first" },
+          error: {
+            code: "REFUND_NOT_ALLOWED",
+            message: "Only cancelled or no-show reservations can be refunded",
+          },
         });
       }
       const [settlement, financials, noRefundDecision] = await Promise.all([
-        calculateCancellationSettlement(app.db, reservation),
+        calculateRefundSettlement(app.db, reservation),
         readReservationFinancials(app.db, reservation.id),
         getNoRefundDecision(app.db, reservation.id),
       ]);
@@ -92,7 +219,10 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
         reservationId: reservation.id,
         bookingCode: reservation.bookingCode,
         source: reservation.source,
-        hasCancellationPolicySnapshot: reservation.cancellationPolicySnapshot !== null,
+        reservationStatus: reservation.reservationStatus,
+        hasCancellationPolicySnapshot:
+          reservation.reservationStatus === "no_show" ||
+          reservation.cancellationPolicySnapshot !== null,
         noRefundDecision,
         settlement,
         grossPaidAmount: financials.grossPaidAmount,
@@ -110,6 +240,17 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           reason: refund.reason,
           reference: refund.providerReference,
           processedAt: refund.processedAt,
+        })),
+        deposits: financials.deposits.map((deposit) => ({
+          id: deposit.id,
+          amountHeld: deposit.amountHeld,
+          amountRefunded: deposit.amountRefunded,
+          amountDeducted: deposit.amountDeducted,
+          refundableRemaining: Math.max(
+            0,
+            deposit.amountHeld - deposit.amountRefunded - deposit.amountDeducted,
+          ),
+          status: deposit.status,
         })),
         payments: financials.payments
           .filter((payment) => ["succeeded", "partially_refunded"].includes(payment.status))
@@ -168,10 +309,10 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           if (!reservation) {
             throw new RefundInputError("RESERVATION_NOT_FOUND", "Reservation not found", 404);
           }
-          if (reservation.reservationStatus !== "cancelled") {
+          if (!refundAllowed(reservation)) {
             throw new RefundInputError(
               "REFUND_NOT_ALLOWED",
-              "Reservation must be cancelled before recording a cancellation refund",
+              "Only cancelled or no-show reservations can be refunded",
             );
           }
           if (await getNoRefundDecision(tx, reservation.id)) {
@@ -203,7 +344,7 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
             throw new RefundInputError("PAYMENT_NOT_REFUNDABLE", "Payment is not refundable");
           }
 
-          const settlement = await calculateCancellationSettlement(tx, reservation);
+          const settlement = await calculateRefundSettlement(tx, reservation);
           const financials = await readReservationFinancials(tx, reservation.id);
           const existingRefunds = financials.refunds;
           const paymentRefundsSoFar = existingRefunds.filter(
@@ -375,8 +516,11 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
             .limit(1);
           if (!reservation)
             throw new RefundInputError("RESERVATION_NOT_FOUND", "Reservation not found", 404);
-          if (reservation.reservationStatus !== "cancelled") {
-            throw new RefundInputError("REFUND_NOT_ALLOWED", "Reservation must be cancelled first");
+          if (!refundAllowed(reservation)) {
+            throw new RefundInputError(
+              "REFUND_NOT_ALLOWED",
+              "Only cancelled or no-show reservations can be refunded",
+            );
           }
           if (await getNoRefundDecision(tx, reservation.id)) {
             throw new RefundInputError(
@@ -385,13 +529,19 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
             );
           }
           const [settlement, financials] = await Promise.all([
-            calculateCancellationSettlement(tx, reservation),
+            calculateRefundSettlement(tx, reservation),
             readReservationFinancials(tx, reservation.id),
           ]);
           if (financials.pendingRefundAmount > 0 || financials.refundedAmount > 0) {
             throw new RefundInputError(
               "REFUND_IN_PROGRESS",
               "Resolve existing refunds before recording No Refund",
+            );
+          }
+          if (reservation.reservationStatus === "no_show" && financials.depositBalance > 0) {
+            throw new RefundInputError(
+              "DEPOSIT_REFUND_REQUIRED",
+              "Return the security deposit before closing settlement without a refund",
             );
           }
           if (financials.grossPaidAmount <= 0) {
@@ -413,8 +563,8 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
             actorType: "user",
             actorUserId: request.authUser!.id,
             occurredAt,
-            reservationStatusBefore: "cancelled",
-            reservationStatusAfter: "cancelled",
+            reservationStatusBefore: reservation.reservationStatus,
+            reservationStatusAfter: reservation.reservationStatus,
             paymentStatusBefore: reservation.paymentStatus,
             paymentStatusAfter: reservation.paymentStatus,
             details: {
@@ -492,8 +642,11 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           if (!reservation) {
             throw new RefundInputError("RESERVATION_NOT_FOUND", "Reservation not found", 404);
           }
-          if (reservation.reservationStatus !== "cancelled") {
-            throw new RefundInputError("REFUND_NOT_ALLOWED", "Reservation must be cancelled first");
+          if (!refundAllowed(reservation)) {
+            throw new RefundInputError(
+              "REFUND_NOT_ALLOWED",
+              "Only cancelled or no-show reservations can be refunded",
+            );
           }
           if (await getNoRefundDecision(tx, reservation.id)) {
             throw new RefundInputError(
@@ -503,14 +656,18 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
           }
 
           const ignorePolicy = request.body.ignoreCancellationPolicy === true;
-          if (ignorePolicy && !reservation.cancellationPolicySnapshot) {
+          if (
+            ignorePolicy &&
+            reservation.reservationStatus !== "no_show" &&
+            !reservation.cancellationPolicySnapshot
+          ) {
             throw new RefundInputError(
               "REFUND_OVERRIDE_NOT_ALLOWED",
               "No policy is available to override",
             );
           }
           const [settlement, financials] = await Promise.all([
-            calculateCancellationSettlement(tx, reservation),
+            calculateRefundSettlement(tx, reservation),
             readReservationFinancials(tx, reservation.id),
           ]);
           if (financials.pendingRefundAmount > 0) {
@@ -617,8 +774,8 @@ export const reservationRefundRoutes: FastifyPluginAsync = async (app) => {
             actorType: "user",
             actorUserId: request.authUser!.id,
             occurredAt: processedAt,
-            reservationStatusBefore: "cancelled",
-            reservationStatusAfter: "cancelled",
+            reservationStatusBefore: reservation.reservationStatus,
+            reservationStatusAfter: reservation.reservationStatus,
             paymentStatusBefore: reservation.paymentStatus,
             paymentStatusAfter: reservationPaymentStatus,
             referenceId: completedRefunds[0].id,

@@ -1,11 +1,13 @@
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { guests } from "../../../db/schema/guests.schema.js";
+import { paymentRefunds } from "../../../db/schema/payment_refunds.schema.js";
 import { payments } from "../../../db/schema/payments.schema.js";
+import { reservationDeposits } from "../../../db/schema/reservation_deposits.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
-import { calculateCancellationSettlement } from "../../reservations/services/reservation-cancellation-settlement.service.js";
 import { readReservationFinancials } from "../../reservations/services/reservation-financials.service.js";
 import { getNoRefundDecision } from "../../reservations/services/reservation-no-refund.service.js";
+import { calculateRefundSettlement } from "../../reservations/services/reservation-refund-settlement.service.js";
 
 type Query = {
   search?: string;
@@ -31,6 +33,22 @@ const hasReceivedPayment = sql`exists (
     and p.status in ('succeeded', 'partially_refunded', 'refunded')
 )`;
 
+const hasActiveDeposit = sql`exists (
+  select 1 from ${reservationDeposits} d
+  where d.reservation_id = ${reservations.id}
+    and d.amount_held > d.amount_refunded + d.amount_deducted
+)`;
+
+const netPaid = sql`coalesce((
+  select sum(p.amount) from ${payments} p
+  where p.reservation_id = ${reservations.id}
+    and p.status in ('succeeded', 'partially_refunded', 'refunded')
+), 0) - coalesce((
+  select sum(r.amount) from ${paymentRefunds} r
+  join ${payments} p on p.id = r.payment_id
+  where p.reservation_id = ${reservations.id} and r.status = 'succeeded'
+), 0)`;
+
 export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: Query }>(
     "/refunds",
@@ -39,8 +57,22 @@ export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
       const { search, source, page = 1, limit = 20 } = request.query;
       const term = search?.trim();
       const filter = and(
-        eq(reservations.reservationStatus, "cancelled"),
-        hasReceivedPayment,
+        or(
+          and(eq(reservations.reservationStatus, "cancelled"), hasReceivedPayment),
+          and(
+            eq(reservations.reservationStatus, "no_show"),
+            or(
+              hasActiveDeposit,
+              and(eq(reservations.source, "ota"), hasReceivedPayment),
+              and(
+                eq(reservations.source, "website"),
+                sql`${reservations.paymentStatus} <> 'paid'`,
+                hasReceivedPayment,
+              ),
+              sql`${netPaid} > coalesce(${reservations.noShowChargeAmount}, ${netPaid})`,
+            ),
+          ),
+        ),
         source ? eq(reservations.source, source) : undefined,
         term
           ? or(
@@ -62,7 +94,10 @@ export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
           .from(reservations)
           .innerJoin(guests, eq(reservations.guestId, guests.id))
           .where(filter)
-          .orderBy(desc(reservations.cancelledAt), desc(reservations.id))
+          .orderBy(
+            desc(sql`coalesce(${reservations.noShowAt}, ${reservations.cancelledAt})`),
+            desc(reservations.id),
+          )
           .limit(limit)
           .offset((page - 1) * limit),
         app.db
@@ -76,8 +111,9 @@ export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
         const batch = await Promise.all(
           rows.slice(offset, offset + 2).map(async ({ reservation, guest }) => {
             const financials = await readReservationFinancials(app.db, reservation.id);
+            const noShow = reservation.reservationStatus === "no_show";
             const [settlement, noRefundDecision] = await Promise.all([
-              calculateCancellationSettlement(app.db, reservation, financials),
+              calculateRefundSettlement(app.db, reservation, financials),
               getNoRefundDecision(app.db, reservation.id),
             ]);
             const estimatedRefundAmount = settlement.amounts.estimatedRefundAmount;
@@ -85,23 +121,27 @@ export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
               ? "no_refund"
               : financials.pendingRefundAmount > 0
                 ? "processing"
-                : financials.grossPaidAmount > 0 && financials.netPaidAmount === 0
-                  ? "completed"
-                  : settlement.calculationStatus === "manual_review_required"
-                    ? "review_required"
-                    : estimatedRefundAmount === 0 && financials.refundedAmount === 0
-                      ? "no_refund_under_policy"
-                      : estimatedRefundAmount === 0 && financials.refundedAmount > 0
-                        ? "policy_settled"
-                        : financials.refundedAmount > 0
-                          ? "partially_refunded"
-                          : "action_required";
+                : noShow && ((estimatedRefundAmount ?? 0) > 0 || financials.depositBalance > 0)
+                  ? "action_required"
+                  : financials.grossPaidAmount > 0 && financials.netPaidAmount === 0
+                    ? "completed"
+                    : settlement.calculationStatus === "manual_review_required"
+                      ? "review_required"
+                      : estimatedRefundAmount === 0 && financials.refundedAmount === 0
+                        ? "no_refund_under_policy"
+                        : estimatedRefundAmount === 0 && financials.refundedAmount > 0
+                          ? "policy_settled"
+                          : financials.refundedAmount > 0
+                            ? "partially_refunded"
+                            : "action_required";
             return {
               reservationId: reservation.id,
               bookingCode: reservation.bookingCode,
               source: reservation.source,
+              reservationStatus: reservation.reservationStatus,
               guest,
               cancelledAt: reservation.cancelledAt,
+              eventAt: reservation.noShowAt ?? reservation.cancelledAt,
               paymentStatus: reservation.paymentStatus,
               status,
               grossPaidAmount: financials.grossPaidAmount,
@@ -109,6 +149,8 @@ export const paymentRefundListRoutes: FastifyPluginAsync = async (app) => {
               pendingRefundAmount: financials.pendingRefundAmount,
               netPaidAmount: financials.netPaidAmount,
               estimatedRefundAmount,
+              depositBalance: financials.depositBalance,
+              noShowPenaltyAmount: noShow ? settlement.amounts.cancellationCharge : null,
               maxRefundWithOverride: Math.max(
                 0,
                 financials.netPaidAmount - financials.pendingRefundAmount,

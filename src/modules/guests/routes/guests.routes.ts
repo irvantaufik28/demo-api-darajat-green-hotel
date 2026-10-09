@@ -22,31 +22,40 @@ type HistoryQuery = { page?: number; limit?: number };
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
 const stayStatuses = sql`('checked_in', 'checked_out')`;
 const outerGuestId = sql`${guests}.${sql.identifier("id")}`;
+const outerGuestNik = sql`${guests}.${sql.identifier("nik")}`;
 const outerReservationId = sql`${reservations}.${sql.identifier("id")}`;
+const reservationMatchesGuestIdentity = sql`(
+  (${outerGuestNik} is not null and exists (
+    select 1 from ${guests} identity_guest
+    where identity_guest.id = r.guest_id
+      and identity_guest.nik = ${outerGuestNik}
+  ))
+  or (${outerGuestNik} is null and r.guest_id = ${outerGuestId})
+)`;
 
 const summaryColumns = {
   totalStays: sql<number>`(
     select count(*)::int from ${reservations} r
-    where r.guest_id = ${outerGuestId}
+    where ${reservationMatchesGuestIdentity}
       and r.reservation_status in ${stayStatuses}
   )`,
   totalNights: sql<number>`(
     select coalesce(sum(r.check_out_date - r.check_in_date), 0)::int
     from ${reservations} r
-    where r.guest_id = ${outerGuestId}
+    where ${reservationMatchesGuestIdentity}
       and r.reservation_status in ${stayStatuses}
   )`,
   totalSpend: sql<number>`(
     select coalesce(sum(c.amount), 0)::bigint
     from ${reservations} r
     join ${reservationCharges} c on c.reservation_id = r.id
-    where r.guest_id = ${outerGuestId}
+    where ${reservationMatchesGuestIdentity}
       and r.reservation_status in ${stayStatuses}
   )`.mapWith(Number),
   lastStay: sql<string | null>`(
     select max(r.check_out_date)
     from ${reservations} r
-    where r.guest_id = ${outerGuestId}
+    where ${reservationMatchesGuestIdentity}
       and r.reservation_status in ${stayStatuses}
   )`,
 };
@@ -55,6 +64,7 @@ function guestColumns() {
   return {
     id: guests.id,
     fullName: guests.fullName,
+    nik: guests.nik,
     phone: guests.phone,
     email: guests.email,
     nationality: guests.nationality,
@@ -92,6 +102,7 @@ export const guestRoutes: FastifyPluginAsync = async (app) => {
         term
           ? or(
               ilike(guests.fullName, `%${term}%`),
+              ilike(guests.nik, `%${term}%`),
               ilike(guests.phone, `%${term}%`),
               ilike(guests.email, `%${term}%`),
             )
@@ -153,13 +164,18 @@ export const guestRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const [guest] = await app.db
-        .select({ id: guests.id })
+        .select({ id: guests.id, nik: guests.nik })
         .from(guests)
         .where(eq(guests.id, request.params.id))
         .limit(1);
       if (!guest) return reply.code(404).send(errorBody("NOT_FOUND", "Guest not found"));
       const { page = 1, limit = 20 } = request.query;
-      const filter = eq(reservations.guestId, guest.id);
+      const filter = guest.nik
+        ? sql`${reservations.guestId} in (
+            select identity_guest.id from ${guests} identity_guest
+            where identity_guest.nik = ${guest.nik}
+          )`
+        : eq(reservations.guestId, guest.id);
       const [items, [count]] = await Promise.all([
         app.db
           .select({
@@ -211,6 +227,7 @@ export const guestRoutes: FastifyPluginAsync = async (app) => {
         .update(guests)
         .set({
           fullName,
+          nik: nullable(request.body.nik),
           phone: nullable(request.body.phone),
           email: nullable(request.body.email),
           nationality: nullable(request.body.nationality),

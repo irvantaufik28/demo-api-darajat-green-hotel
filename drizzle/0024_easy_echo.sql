@@ -1,0 +1,1 @@
+ALTER TABLE "greenhero"."guests" ADD COLUMN "nik" varchar(32);

@@ -91,7 +91,14 @@ export const reservationCheckOutRoutes: FastifyPluginAsync = async (app) => {
     "/check-out-context",
     {
       preHandler: app.requirePermission("reservations.check_out"),
-      schema: { querystring: { type: "object", additionalProperties: false, required: ["checkOutDate"], properties: { checkOutDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" } } } },
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          required: ["checkOutDate"],
+          properties: { checkOutDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" } },
+        },
+      },
     },
     async (request) => getCheckOutTimeContext(app.db, request.query.checkOutDate),
   );
@@ -123,13 +130,26 @@ export const reservationCheckOutRoutes: FastifyPluginAsync = async (app) => {
           }
 
           const checkoutContext = await getCheckOutTimeContext(tx, reservation.checkOutDate);
-          if (checkoutContext.kind === "early_departure" && request.body?.acknowledgeEarlyDeparture !== true) {
-            throw new CheckOutInputError("EARLY_DEPARTURE_CONFIRMATION_REQUIRED", "Confirm early departure before checkout");
+          if (
+            checkoutContext.kind === "early_departure" &&
+            request.body?.acknowledgeEarlyDeparture !== true
+          ) {
+            throw new CheckOutInputError(
+              "EARLY_DEPARTURE_CONFIRMATION_REQUIRED",
+              "Confirm early departure before checkout",
+            );
           }
-          if (checkoutContext.kind === "late_checkout" && request.body?.lateCheckOut?.acknowledged !== true) {
-            throw new CheckOutInputError("LATE_CHECKOUT_CONFIRMATION_REQUIRED", "Confirm late checkout before continuing");
+          if (
+            checkoutContext.kind === "late_checkout" &&
+            request.body?.lateCheckOut?.acknowledged !== true
+          ) {
+            throw new CheckOutInputError(
+              "LATE_CHECKOUT_CONFIRMATION_REQUIRED",
+              "Confirm late checkout before continuing",
+            );
           }
-          const lateCheckOut = checkoutContext.kind === "late_checkout" ? request.body?.lateCheckOut : null;
+          const lateCheckOut =
+            checkoutContext.kind === "late_checkout" ? request.body?.lateCheckOut : null;
           const lateCharge = lateCheckOut
             ? await addLateCheckOutCharge(tx, {
                 reservationId: reservation.id,
@@ -145,9 +165,12 @@ export const reservationCheckOutRoutes: FastifyPluginAsync = async (app) => {
               .from(reservationRooms)
               .where(eq(reservationRooms.reservationId, reservation.id)),
           ]);
-          const paymentStatusBeforeSettlement = financialsBefore.remainingBalance === 0
-            ? "paid"
-            : financialsBefore.netPaidAmount > 0 ? "partial" : "unpaid";
+          const paymentStatusBeforeSettlement =
+            financialsBefore.remainingBalance === 0
+              ? "paid"
+              : financialsBefore.netPaidAmount > 0
+                ? "partial"
+                : "unpaid";
           if (lateCharge?.chargeId) {
             await recordReservationEvent(tx, {
               reservationId: reservation.id,
@@ -159,7 +182,10 @@ export const reservationCheckOutRoutes: FastifyPluginAsync = async (app) => {
               paymentStatusBefore: reservation.paymentStatus,
               paymentStatusAfter: paymentStatusBeforeSettlement,
               referenceId: lateCharge.chargeId,
-              details: { amount: lateCheckOut!.chargeAmount, paymentTiming: lateCheckOut!.paymentTiming },
+              details: {
+                amount: lateCheckOut!.chargeAmount,
+                paymentTiming: lateCheckOut!.paymentTiming,
+              },
             });
           }
           if (lateCharge?.paymentId) {
@@ -173,7 +199,11 @@ export const reservationCheckOutRoutes: FastifyPluginAsync = async (app) => {
               paymentStatusBefore: reservation.paymentStatus,
               paymentStatusAfter: paymentStatusBeforeSettlement,
               referenceId: lateCharge.paymentId,
-              details: { amount: lateCheckOut!.chargeAmount, methodId: lateCheckOut!.paymentMethodId, source: "late_checkout" },
+              details: {
+                amount: lateCheckOut!.chargeAmount,
+                methodId: lateCheckOut!.paymentMethodId,
+                source: "late_checkout",
+              },
             });
           }
 
@@ -216,6 +246,12 @@ export const reservationCheckOutRoutes: FastifyPluginAsync = async (app) => {
 
           const outstandingReason = request.body?.outstandingReason?.trim() ?? "";
           if (warning === "outstanding") {
+            if (!checkoutContext.allowOutstandingCheckOut) {
+              throw new CheckOutInputError(
+                "OUTSTANDING_CHECK_OUT_DISABLED",
+                "Checkout requires full payment because checkout with an outstanding balance is disabled",
+              );
+            }
             if (request.body?.acknowledgeOutstanding !== true || !outstandingReason) {
               throw new CheckOutInputError(
                 "OUTSTANDING_CONFIRMATION_REQUIRED",

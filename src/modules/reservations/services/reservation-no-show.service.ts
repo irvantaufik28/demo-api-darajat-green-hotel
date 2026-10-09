@@ -88,7 +88,13 @@ export async function markReservationNoShow(
     details: {
       reason,
       calculationStatus: settlement.calculationStatus,
+      settlementStatus: settlement.settlementStatus,
+      strategy: settlement.strategy,
       noShowCharge: settlement.amounts.noShowCharge,
+      paymentAppliedToPenalty: settlement.amounts.paymentAppliedToPenalty,
+      uncollectedPenaltyAmount: settlement.amounts.uncollectedPenaltyAmount,
+      estimatedAmountDue: settlement.amounts.estimatedAmountDue,
+      depositReturnRequired: settlement.amounts.depositReturnRequired,
       reviewReasons: settlement.reviewReasons,
       inventoryReleased: true,
       automated: input.actorType === "system",

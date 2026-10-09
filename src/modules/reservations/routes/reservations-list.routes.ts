@@ -16,6 +16,8 @@ type ListQuery = {
     "pending" | "confirmed" | "checked_in" | "checked_out" | "no_show" | "cancelled" | "expired";
   paymentStatus?: "unpaid" | "partial" | "paid" | "failed" | "expired" | "refunded";
   stayDate?: string;
+  stayDateFrom?: string;
+  stayDateTo?: string;
   sort?: "newest" | "booking_code_asc" | "booking_code_desc";
   page?: number;
   limit?: number;
@@ -44,6 +46,8 @@ const listQuerySchema = {
       enum: ["unpaid", "partial", "paid", "failed", "expired", "refunded"],
     },
     stayDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    stayDateFrom: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    stayDateTo: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     sort: {
       type: "string",
       enum: ["newest", "booking_code_asc", "booking_code_desc"],
@@ -75,6 +79,8 @@ export const reservationListRoutes: FastifyPluginAsync = async (app) => {
         reservationStatus,
         paymentStatus,
         stayDate,
+        stayDateFrom,
+        stayDateTo,
         sort = "newest",
         page = 1,
         limit = 20,
@@ -83,6 +89,15 @@ export const reservationListRoutes: FastifyPluginAsync = async (app) => {
         return reply
           .code(400)
           .send({ error: { code: "INVALID_STAY_DATE", message: "Stay date is invalid" } });
+      }
+      if (
+        (stayDateFrom && !validDate(stayDateFrom)) ||
+        (stayDateTo && !validDate(stayDateTo)) ||
+        (stayDateFrom && stayDateTo && stayDateFrom > stayDateTo)
+      ) {
+        return reply.code(400).send({
+          error: { code: "INVALID_STAY_DATE_RANGE", message: "Stay date range is invalid" },
+        });
       }
 
       const term = search?.trim();
@@ -100,6 +115,12 @@ export const reservationListRoutes: FastifyPluginAsync = async (app) => {
         paymentStatus ? eq(reservations.paymentStatus, paymentStatus) : undefined,
         stayDate
           ? and(lte(reservations.checkInDate, stayDate), gt(reservations.checkOutDate, stayDate))
+          : undefined,
+        stayDateFrom && stayDateTo
+          ? and(
+              lte(reservations.checkInDate, stayDateTo),
+              gt(reservations.checkOutDate, stayDateFrom),
+            )
           : undefined,
       );
       const ordering =

@@ -9,6 +9,7 @@ export const guests = appSchema.table(
   {
     id: idColumn(),
     fullName: varchar("full_name", { length: 160 }).notNull(),
+    nik: varchar("nik", { length: 32 }),
     phone: varchar("phone", { length: 40 }),
     email: varchar("email", { length: 255 }),
     nationality: text("nationality"),

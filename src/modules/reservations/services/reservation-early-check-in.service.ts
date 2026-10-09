@@ -16,7 +16,10 @@ export type EarlyCheckInInput = {
 };
 
 export class EarlyCheckInError extends Error {
-  constructor(readonly code: string, message: string) {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -29,7 +32,10 @@ export async function getEarlyCheckInContext(
   now = new Date(),
 ) {
   const [row] = await db
-    .select({ checkInTime: reservationSettings.checkInTime })
+    .select({
+      checkInTime: reservationSettings.checkInTime,
+      allowOutstandingCheckIn: reservationSettings.allowOutstandingCheckIn,
+    })
     .from(reservationSettings)
     .where(eq(reservationSettings.id, settingsId))
     .limit(1);
@@ -51,6 +57,7 @@ export async function getEarlyCheckInContext(
     serverDate,
     serverTime,
     standardCheckInTime,
+    allowOutstandingCheckIn: row?.allowOutstandingCheckIn ?? true,
     required: checkInDate === serverDate && serverTime < standardCheckInTime,
   };
 }
@@ -67,45 +74,65 @@ export async function addEarlyCheckInCharge(
   const { earlyCheckIn, reservationId, actorUserId } = input;
   const chargeAmount = earlyCheckIn.chargeAmount;
   if (!Number.isSafeInteger(chargeAmount) || chargeAmount < 0) {
-    throw new EarlyCheckInError("INVALID_EARLY_CHECK_IN_CHARGE", "Enter a valid early check-in charge");
+    throw new EarlyCheckInError(
+      "INVALID_EARLY_CHECK_IN_CHARGE",
+      "Enter a valid early check-in charge",
+    );
   }
   if (chargeAmount === 0) return { chargeId: null, paymentId: null };
 
   if (earlyCheckIn.paymentTiming === "now") {
-    if (!earlyCheckIn.paymentMethodId) throw new EarlyCheckInError("EARLY_CHECK_IN_PAYMENT_METHOD_REQUIRED", "Select a payment method for the early check-in charge");
+    if (!earlyCheckIn.paymentMethodId)
+      throw new EarlyCheckInError(
+        "EARLY_CHECK_IN_PAYMENT_METHOD_REQUIRED",
+        "Select a payment method for the early check-in charge",
+      );
     const [method] = await tx
       .select({ id: masterItems.id })
       .from(masterItems)
-      .where(and(
-        eq(masterItems.id, earlyCheckIn.paymentMethodId),
-        eq(masterItems.category, "payment_methods"),
-        eq(masterItems.isActive, true),
-      ))
+      .where(
+        and(
+          eq(masterItems.id, earlyCheckIn.paymentMethodId),
+          eq(masterItems.category, "payment_methods"),
+          eq(masterItems.isActive, true),
+        ),
+      )
       .limit(1);
-    if (!method) throw new EarlyCheckInError("INVALID_EARLY_CHECK_IN_PAYMENT_METHOD", "Select an active payment method");
+    if (!method)
+      throw new EarlyCheckInError(
+        "INVALID_EARLY_CHECK_IN_PAYMENT_METHOD",
+        "Select an active payment method",
+      );
   }
 
-  const [charge] = await tx.insert(reservationCharges).values({
-    reservationId,
-    kind: "adjustment",
-    description: "Early check-in charge",
-    quantity: "1",
-    unitAmount: chargeAmount,
-    amount: chargeAmount,
-    serviceDate: input.checkInDate,
-    createdByUserId: actorUserId,
-  }).returning({ id: reservationCharges.id });
+  const [charge] = await tx
+    .insert(reservationCharges)
+    .values({
+      reservationId,
+      kind: "adjustment",
+      description: "Early check-in charge",
+      quantity: "1",
+      unitAmount: chargeAmount,
+      amount: chargeAmount,
+      serviceDate: input.checkInDate,
+      createdByUserId: actorUserId,
+    })
+    .returning({ id: reservationCharges.id });
 
-  const [payment] = earlyCheckIn.paymentTiming === "now"
-    ? await tx.insert(payments).values({
-        reservationId,
-        methodId: earlyCheckIn.paymentMethodId!,
-        amount: chargeAmount,
-        status: "succeeded",
-        paidAt: new Date(),
-        recordedByUserId: actorUserId,
-        notes: "Early check-in charge",
-      }).returning({ id: payments.id })
-    : [];
+  const [payment] =
+    earlyCheckIn.paymentTiming === "now"
+      ? await tx
+          .insert(payments)
+          .values({
+            reservationId,
+            methodId: earlyCheckIn.paymentMethodId!,
+            amount: chargeAmount,
+            status: "succeeded",
+            paidAt: new Date(),
+            recordedByUserId: actorUserId,
+            notes: "Early check-in charge",
+          })
+          .returning({ id: payments.id })
+      : [];
   return { chargeId: charge.id, paymentId: payment?.id ?? null };
 }

@@ -281,11 +281,13 @@ export async function getReservationsReport(
   const items: ReservationReportRow[] = pageRows.map((row) => {
     const roomQuantity = Math.max(1, roomCountByReservation.get(row.id) ?? 0);
     const nights = Math.max(1, row.nights);
+    const netPaid = Math.max(0, (paymentsById.get(row.id) ?? 0) - (refundsById.get(row.id) ?? 0));
     const bookingTotal =
       row.reservationStatus === "no_show"
-        ? (row.noShowChargeAmount ?? 0)
+        ? row.source === "ota" || (row.source === "website" && row.paymentStatus !== "paid")
+          ? 0
+          : Math.min(row.noShowChargeAmount ?? netPaid, netPaid)
         : (chargesById.get(row.id) ?? 0);
-    const netPaid = Math.max(0, (paymentsById.get(row.id) ?? 0) - (refundsById.get(row.id) ?? 0));
     const isInactive = inactiveStatuses.includes(row.reservationStatus);
     const paid = isInactive ? 0 : netPaid;
     const outstanding = isInactive ? 0 : Math.max(0, bookingTotal - netPaid);
@@ -349,7 +351,9 @@ async function computeFinancialSnapshot(
   const activeIdsRows = await db
     .select({
       id: reservations.id,
+      source: reservations.source,
       reservationStatus: reservations.reservationStatus,
+      paymentStatus: reservations.paymentStatus,
       noShowChargeAmount: reservations.noShowChargeAmount,
     })
     .from(reservations)
@@ -411,14 +415,16 @@ async function computeFinancialSnapshot(
   const refundsById = new Map(refundRows.map((row) => [row.reservationId, row.amount]));
 
   const chargeById = new Map(chargeRows.map((row) => [row.reservationId, row.amount]));
-  const bookingValue = activeIdsRows.reduce(
-    (sum, row) =>
-      sum +
-      (row.reservationStatus === "no_show"
-        ? (row.noShowChargeAmount ?? 0)
-        : (chargeById.get(row.id) ?? 0)),
-    0,
-  );
+  const bookingValue = activeIdsRows.reduce((sum, row) => {
+    if (row.reservationStatus !== "no_show") {
+      return sum + (chargeById.get(row.id) ?? 0);
+    }
+    const netPaid = Math.max(0, (paymentsById.get(row.id) ?? 0) - (refundsById.get(row.id) ?? 0));
+    if (row.source === "ota" || (row.source === "website" && row.paymentStatus !== "paid")) {
+      return sum;
+    }
+    return sum + Math.min(row.noShowChargeAmount ?? netPaid, netPaid);
+  }, 0);
   let paid = 0;
   for (const id of activeIds) {
     paid += Math.max(0, (paymentsById.get(id) ?? 0) - (refundsById.get(id) ?? 0));

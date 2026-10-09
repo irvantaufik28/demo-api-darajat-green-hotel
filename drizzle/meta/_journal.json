@@ -169,6 +169,13 @@
       "when": 1791535632657,
       "tag": "0023_worthless_scourge",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791557384824,
+      "tag": "0024_easy_echo",
+      "breakpoints": true
     }
   ]
 }

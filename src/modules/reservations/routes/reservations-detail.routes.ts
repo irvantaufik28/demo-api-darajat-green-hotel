@@ -87,10 +87,12 @@ export const reservationDetailRoutes: FastifyPluginAsync = async (app) => {
         ]),
       ];
       const recorderIds = [
-        ...new Set([
-          ...financials.payments.map((payment) => payment.recordedByUserId),
-          ...financials.refunds.map((refund) => refund.processedByUserId),
-        ].filter((id): id is string => Boolean(id))),
+        ...new Set(
+          [
+            ...financials.payments.map((payment) => payment.recordedByUserId),
+            ...financials.refunds.map((refund) => refund.processedByUserId),
+          ].filter((id): id is string => Boolean(id)),
+        ),
       ];
       const [methods, recorders] = await Promise.all([
         methodIds.length
@@ -112,9 +114,23 @@ export const reservationDetailRoutes: FastifyPluginAsync = async (app) => {
             .map((night) => [night.campaignSnapshot!.id, night.campaignSnapshot!]),
         ).values(),
       ];
+      const effectiveNoShowCharge =
+        record.reservation.reservationStatus !== "no_show"
+          ? record.reservation.noShowChargeAmount
+          : record.reservation.source === "ota" ||
+              (record.reservation.source === "website" &&
+                record.reservation.paymentStatus !== "paid")
+            ? null
+            : Math.min(
+                record.reservation.noShowChargeAmount ?? financials.netPaidAmount,
+                financials.netPaidAmount,
+              );
 
       return {
-        reservation: record.reservation,
+        reservation: {
+          ...record.reservation,
+          noShowChargeAmount: effectiveNoShowCharge,
+        },
         guest: record.guest,
         otaChannel: otaChannelRows[0] ?? null,
         rooms: roomRows.map(({ reservationRoom, roomNumber }) => ({
@@ -154,7 +170,8 @@ export const reservationDetailRoutes: FastifyPluginAsync = async (app) => {
           grossPaidAmount: financials.grossPaidAmount,
           refundedAmount: financials.refundedAmount,
           paidAmount: financials.netPaidAmount,
-          remainingBalance: financials.remainingBalance,
+          remainingBalance:
+            record.reservation.reservationStatus === "no_show" ? 0 : financials.remainingBalance,
           depositBalance: financials.depositBalance,
         },
       };

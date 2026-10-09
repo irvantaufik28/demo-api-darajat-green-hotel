@@ -19,7 +19,12 @@ export type CreateReservationBody = {
   otaChannelId?: string;
   externalReference?: string;
   guestId?: string;
-  guest?: { fullName: string; phone?: string | null; email?: string | null };
+  guest?: {
+    fullName: string;
+    nik?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  };
   checkInDate: string;
   checkOutDate: string;
   totalAdults?: number;
@@ -135,6 +140,7 @@ export const createReservationBodySchema = {
       required: ["fullName"],
       properties: {
         fullName: { type: "string", minLength: 1, maxLength: 160 },
+        nik: { anyOf: [{ type: "string", maxLength: 32 }, { type: "null" }] },
         phone: { anyOf: [{ type: "string", maxLength: 40 }, { type: "null" }] },
         email: { anyOf: [{ type: "string", maxLength: 255 }, { type: "null" }] },
       },

@@ -1,6 +1,7 @@
 import { and, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
+import { guests } from "../../../db/schema/guests.schema.js";
 import { reservationDeposits } from "../../../db/schema/reservation_deposits.schema.js";
 import { reservationRooms } from "../../../db/schema/reservation_rooms.schema.js";
 import { reservations } from "../../../db/schema/reservations.schema.js";
@@ -11,10 +12,16 @@ import { recordReservationEvent } from "../services/reservation-events.service.j
 import { readReservationFinancials } from "../services/reservation-financials.service.js";
 import { getCheckInWarning } from "../reservation-status.js";
 import { bookingDateJakarta } from "../services/reservations-campaigns.service.js";
-import { addEarlyCheckInCharge, EarlyCheckInError, getEarlyCheckInContext, type EarlyCheckInInput } from "../services/reservation-early-check-in.service.js";
+import {
+  addEarlyCheckInCharge,
+  EarlyCheckInError,
+  getEarlyCheckInContext,
+  type EarlyCheckInInput,
+} from "../services/reservation-early-check-in.service.js";
 
 type CheckInParams = { id: string };
 type CheckInBody = {
+  guestNik?: string;
   acknowledgeOutstanding?: boolean;
   rooms?: { reservationRoomId: string; roomUnitId: string }[];
   deposit?: { amount: number; methodId: string; notes?: string };
@@ -31,6 +38,7 @@ const bodySchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    guestNik: { type: "string", maxLength: 32 },
     acknowledgeOutstanding: { type: "boolean" },
     rooms: {
       type: "array",
@@ -81,7 +89,14 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
     "/check-in-context",
     {
       preHandler: app.requirePermission("reservations.check_in"),
-      schema: { querystring: { type: "object", additionalProperties: false, required: ["checkInDate"], properties: { checkInDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" } } } },
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          required: ["checkInDate"],
+          properties: { checkInDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" } },
+        },
+      },
     },
     async (request) => getEarlyCheckInContext(app.db, request.query.checkInDate),
   );
@@ -124,10 +139,29 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
           const earlyContext = await getEarlyCheckInContext(tx, reservation.checkInDate);
           const early = request.body?.earlyCheckIn;
           if (earlyContext.required && early?.acknowledged !== true) {
-            throw new CheckInInputError("EARLY_CHECK_IN_CONFIRMATION_REQUIRED", "Confirm early check-in before the standard check-in time");
+            throw new CheckInInputError(
+              "EARLY_CHECK_IN_CONFIRMATION_REQUIRED",
+              "Confirm early check-in before the standard check-in time",
+            );
           }
-          if (earlyContext.required && early && early.paymentTiming === "now" && early.chargeAmount > 0 && !early.paymentMethodId) {
-            throw new CheckInInputError("INVALID_EARLY_CHECK_IN", "Early check-in details or payment method are invalid", 400);
+          if (
+            earlyContext.required &&
+            early &&
+            early.paymentTiming === "now" &&
+            early.chargeAmount > 0 &&
+            !early.paymentMethodId
+          ) {
+            throw new CheckInInputError(
+              "INVALID_EARLY_CHECK_IN",
+              "Early check-in details or payment method are invalid",
+              400,
+            );
+          }
+          if (warning !== "none" && !earlyContext.allowOutstandingCheckIn) {
+            throw new CheckInInputError(
+              "OUTSTANDING_CHECK_IN_DISABLED",
+              "Check-in requires full payment because outstanding check-in is disabled",
+            );
           }
           if (warning !== "none" && request.body?.acknowledgeOutstanding !== true) {
             throw new CheckInInputError(
@@ -241,7 +275,19 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
             );
           }
 
-          const { remainingBalance: originalBalance } = await readReservationFinancials(tx, reservation.id);
+          const { remainingBalance: originalBalance } = await readReservationFinancials(
+            tx,
+            reservation.id,
+          );
+          const projectedOutstanding =
+            originalBalance +
+            (earlyContext.required && early?.paymentTiming === "later" ? early.chargeAmount : 0);
+          if (projectedOutstanding > 0 && !earlyContext.allowOutstandingCheckIn) {
+            throw new CheckInInputError(
+              "OUTSTANDING_CHECK_IN_DISABLED",
+              "Check-in requires full payment because outstanding check-in is disabled",
+            );
+          }
           if (originalBalance > 0 && request.body?.acknowledgeOutstanding !== true) {
             throw new CheckInInputError(
               "OUTSTANDING_CONFIRMATION_REQUIRED",
@@ -262,7 +308,11 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
               )
               .limit(1);
             if (!method) {
-              throw new CheckInInputError("INVALID_DEPOSIT_METHOD", "Select an active deposit payment method", 400);
+              throw new CheckInInputError(
+                "INVALID_DEPOSIT_METHOD",
+                "Select an active deposit payment method",
+                400,
+              );
             }
           }
 
@@ -283,19 +333,30 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
             .where(inArray(roomUnits.id, unitIds));
 
           const checkedInAt = new Date();
-          const earlyCharge = earlyContext.required && early
-            ? await addEarlyCheckInCharge(tx, {
-                reservationId: reservation.id,
-                checkInDate: reservation.checkInDate,
-                actorUserId: request.authUser!.id,
-                earlyCheckIn: early,
-              })
-            : null;
+          const guestNik = request.body?.guestNik?.trim();
+          if (guestNik) {
+            await tx
+              .update(guests)
+              .set({ nik: guestNik, updatedAt: checkedInAt })
+              .where(eq(guests.id, reservation.guestId));
+          }
+          const earlyCharge =
+            earlyContext.required && early
+              ? await addEarlyCheckInCharge(tx, {
+                  reservationId: reservation.id,
+                  checkInDate: reservation.checkInDate,
+                  actorUserId: request.authUser!.id,
+                  earlyCheckIn: early,
+                })
+              : null;
           const financials = await readReservationFinancials(tx, reservation.id);
           const remainingBalance = financials.remainingBalance;
-          const paymentStatus = financials.netPaidAmount >= financials.bookingTotal
-            ? "paid"
-            : financials.netPaidAmount > 0 ? "partial" : "unpaid";
+          const paymentStatus =
+            financials.netPaidAmount >= financials.bookingTotal
+              ? "paid"
+              : financials.netPaidAmount > 0
+                ? "partial"
+                : "unpaid";
           const [heldDeposit] = request.body?.deposit
             ? await tx
                 .insert(reservationDeposits)
@@ -334,7 +395,11 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
               paymentStatusBefore: reservation.paymentStatus,
               paymentStatusAfter: paymentStatus,
               referenceId: earlyCharge.paymentId,
-              details: { amount: early!.chargeAmount, methodId: early!.paymentMethodId, source: "early_check_in" },
+              details: {
+                amount: early!.chargeAmount,
+                methodId: early!.paymentMethodId,
+                source: "early_check_in",
+              },
             });
           }
           await tx
@@ -359,7 +424,10 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
               paymentStatusBefore: reservation.paymentStatus,
               paymentStatusAfter: reservation.paymentStatus,
               referenceId: heldDeposit.id,
-              details: { amount: request.body!.deposit!.amount, methodId: request.body!.deposit!.methodId },
+              details: {
+                amount: request.body!.deposit!.amount,
+                methodId: request.body!.deposit!.methodId,
+              },
             });
           }
           await recordReservationEvent(tx, {
@@ -381,14 +449,16 @@ export const reservationCheckInRoutes: FastifyPluginAsync = async (app) => {
               remainingBalance,
               outstandingAcknowledged: originalBalance > 0,
               depositId: heldDeposit?.id ?? null,
-              earlyCheckIn: earlyContext.required ? {
-                standardCheckInTime: earlyContext.standardCheckInTime,
-                serverTime: earlyContext.serverTime,
-                chargeAmount: early?.chargeAmount ?? 0,
-                paymentTiming: early?.paymentTiming ?? "later",
-                chargeId: earlyCharge?.chargeId ?? null,
-                paymentId: earlyCharge?.paymentId ?? null,
-              } : null,
+              earlyCheckIn: earlyContext.required
+                ? {
+                    standardCheckInTime: earlyContext.standardCheckInTime,
+                    serverTime: earlyContext.serverTime,
+                    chargeAmount: early?.chargeAmount ?? 0,
+                    paymentTiming: early?.paymentTiming ?? "later",
+                    chargeId: earlyCharge?.chargeId ?? null,
+                    paymentId: earlyCharge?.paymentId ?? null,
+                  }
+                : null,
             },
           });
 

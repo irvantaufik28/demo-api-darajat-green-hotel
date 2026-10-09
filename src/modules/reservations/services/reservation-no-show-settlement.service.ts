@@ -71,7 +71,7 @@ export async function calculateNoShowSettlement(db: QueryDatabase, reservation: 
       .where(eq(reservationRooms.reservationId, reservation.id))
       .orderBy(asc(reservationRoomNights.stayDate)),
   ]);
-  const reviewReasons: string[] = [];
+  const policyReviewReasons: string[] = [];
   const breakdown: Array<{
     reservationRoomId: string;
     roomTypeName: string;
@@ -91,7 +91,7 @@ export async function calculateNoShowSettlement(db: QueryDatabase, reservation: 
       const roomNights = nights.filter((night) => night.reservationRoomId === room.id);
       const roomTotal = roomNights.reduce((sum, night) => sum + night.finalPrice, 0);
       const policy = isRecord(entry) ? policyFromSnapshot(entry.snapshot) : null;
-      if (!policy) reviewReasons.push(`No-show policy is missing for ${room.name}`);
+      if (!policy) policyReviewReasons.push(`No-show policy is missing for ${room.name}`);
       breakdown.push({
         reservationRoomId: room.id,
         roomTypeName: room.name,
@@ -120,7 +120,8 @@ export async function calculateNoShowSettlement(db: QueryDatabase, reservation: 
     }
   } else {
     const policy = policyFromSnapshot(snapshot);
-    if (!policy) reviewReasons.push("No-show policy is missing from the reservation snapshot");
+    if (!policy)
+      policyReviewReasons.push("No-show policy is missing from the reservation snapshot");
     for (const room of rooms) {
       const roomNights = nights.filter((night) => night.reservationRoomId === room.id);
       const roomTotal = roomNights.reduce((sum, night) => sum + night.finalPrice, 0);
@@ -138,11 +139,48 @@ export async function calculateNoShowSettlement(db: QueryDatabase, reservation: 
     }
   }
 
-  const charge = reviewReasons.length
+  const policyCharge = policyReviewReasons.length
     ? null
     : breakdown.reduce((sum, room) => sum + (room.noShowCharge ?? 0), 0);
+  const isPhoneOrWalkIn = reservation.source === "phone" || reservation.source === "walk_in";
+  const isPaidWebsite =
+    reservation.source === "website" &&
+    reservation.paymentStatus === "paid" &&
+    financials.netPaidAmount >= financials.bookingTotal;
+  const requiresManualReview =
+    reservation.source === "ota" || (reservation.source === "website" && !isPaidWebsite);
+  const reviewReasons = requiresManualReview
+    ? [
+        ...(reservation.source === "ota"
+          ? ["OTA no-show settlement must follow the channel policy"]
+          : ["Website reservation is not fully paid"]),
+        ...policyReviewReasons,
+      ]
+    : [];
+  const chargeLimit = policyCharge ?? (isPhoneOrWalkIn ? financials.netPaidAmount : null);
+  const charge =
+    requiresManualReview || chargeLimit === null
+      ? null
+      : Math.min(financials.netPaidAmount, chargeLimit);
+  const refundDue = charge === null ? null : Math.max(0, financials.netPaidAmount - charge);
+  const uncollectedPenaltyAmount =
+    charge === null || policyCharge === null ? null : Math.max(0, policyCharge - charge);
+  const depositReturnRequired = financials.depositBalance > 0;
+  const settlementStatus = requiresManualReview
+    ? "manual_review_required"
+    : depositReturnRequired || (refundDue ?? 0) > 0
+      ? "refund_required"
+      : "settled";
+
   return {
-    calculationStatus: reviewReasons.length ? "manual_review_required" : "calculated",
+    calculationStatus: requiresManualReview ? "manual_review_required" : "calculated",
+    settlementStatus,
+    strategy:
+      reservation.source === "ota"
+        ? "ota_manual_review"
+        : isPaidWebsite
+          ? "website_prepaid_policy"
+          : "payment_forfeiture",
     reviewReasons,
     policy: { rooms: breakdown },
     amounts: {
@@ -151,10 +189,13 @@ export async function calculateNoShowSettlement(db: QueryDatabase, reservation: 
       otherCharges: financials.otherCharges,
       netPaidAmount: financials.netPaidAmount,
       depositBalance: financials.depositBalance,
+      policyNoShowCharge: policyCharge,
       noShowCharge: charge,
-      maximumRefundWithoutOverride:
-        charge === null ? null : Math.max(0, financials.netPaidAmount - charge),
-      estimatedAmountDue: charge === null ? null : Math.max(0, charge - financials.netPaidAmount),
+      paymentAppliedToPenalty: charge,
+      uncollectedPenaltyAmount,
+      maximumRefundWithoutOverride: refundDue,
+      estimatedAmountDue: charge === null ? null : 0,
+      depositReturnRequired,
     },
   };
 }
