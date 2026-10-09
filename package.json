@@ -12,9 +12,11 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
     "worker:email": "node --env-file-if-exists=.env --import tsx src/email-worker.ts",
+    "worker:reservation": "node --env-file-if-exists=.env --import tsx src/reservation-worker.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "start:email-worker": "node --env-file-if-exists=.env dist/email-worker.js",
+    "start:reservation-worker": "node --env-file-if-exists=.env dist/reservation-worker.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

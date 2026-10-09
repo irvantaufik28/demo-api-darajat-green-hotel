@@ -9,6 +9,8 @@ type SettingsBody = {
   allowOutstandingCheckIn: boolean;
   allowOutstandingCheckOut: boolean;
   websitePaymentExpiryMinutes: number;
+  noShowMode: "manual" | "automatic";
+  noShowCutoffTime: string;
 };
 
 const settingsId = "00000000-0000-4000-8000-000000000001";
@@ -19,6 +21,8 @@ const defaults: SettingsBody = {
   allowOutstandingCheckIn: true,
   allowOutstandingCheckOut: true,
   websitePaymentExpiryMinutes: 30,
+  noShowMode: "automatic",
+  noShowCutoffTime: "06:00",
 };
 
 const bodySchema = {
@@ -31,6 +35,8 @@ const bodySchema = {
     "allowOutstandingCheckIn",
     "allowOutstandingCheckOut",
     "websitePaymentExpiryMinutes",
+    "noShowMode",
+    "noShowCutoffTime",
   ],
   properties: {
     checkInTime: { type: "string", pattern: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
@@ -39,6 +45,8 @@ const bodySchema = {
     allowOutstandingCheckIn: { type: "boolean" },
     allowOutstandingCheckOut: { type: "boolean" },
     websitePaymentExpiryMinutes: { type: "integer", minimum: 11, maximum: 1440 },
+    noShowMode: { type: "string", enum: ["manual", "automatic"] },
+    noShowCutoffTime: { type: "string", pattern: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
   },
 } as const;
 
@@ -52,9 +60,10 @@ function response(row: typeof reservationSettings.$inferSelect | undefined) {
           allowOutstandingCheckIn: row.allowOutstandingCheckIn,
           allowOutstandingCheckOut: row.allowOutstandingCheckOut,
           websitePaymentExpiryMinutes: row.websitePaymentExpiryMinutes,
+          noShowMode: row.noShowMode as "manual" | "automatic",
+          noShowCutoffTime: row.noShowCutoffTime.slice(0, 5),
         }
       : defaults,
-    noShowMode: "manual" as const,
     updatedAt: row?.updatedAt ?? null,
     updatedByUserId: row?.updatedByUserId ?? null,
   };
@@ -82,7 +91,6 @@ export const reservationSettingsRoutes: FastifyPluginAsync = async (app) => {
         .values({
           id: settingsId,
           ...request.body,
-          noShowMode: "manual",
           updatedByUserId: request.authUser!.id,
           updatedAt: new Date(),
         })
@@ -90,7 +98,6 @@ export const reservationSettingsRoutes: FastifyPluginAsync = async (app) => {
           target: reservationSettings.id,
           set: {
             ...request.body,
-            noShowMode: "manual",
             updatedByUserId: request.authUser!.id,
             updatedAt: new Date(),
           },

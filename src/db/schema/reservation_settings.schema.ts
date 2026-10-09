@@ -17,14 +17,15 @@ export const reservationSettings = appSchema.table(
     allowOutstandingCheckIn: boolean("allow_outstanding_check_in").notNull().default(true),
     allowOutstandingCheckOut: boolean("allow_outstanding_check_out").notNull().default(true),
     websitePaymentExpiryMinutes: smallint("website_payment_expiry_minutes").notNull().default(30),
-    noShowMode: varchar("no_show_mode", { length: 20 }).notNull().default("manual"),
+    noShowMode: varchar("no_show_mode", { length: 20 }).notNull().default("automatic"),
+    noShowCutoffTime: time("no_show_cutoff_time").notNull().default("06:00"),
     updatedByUserId: uuid("updated_by_user_id").references(() => users.id),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check(
       "reservation_settings_values_check",
-      sql`${table.websitePaymentExpiryMinutes} >= 11 and ${table.noShowMode} = 'manual'`,
+      sql`${table.websitePaymentExpiryMinutes} >= 11 and ${table.noShowMode} in ('manual', 'automatic')`,
     ),
   ],
 );
