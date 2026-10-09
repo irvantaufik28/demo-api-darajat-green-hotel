@@ -19,6 +19,7 @@ export { reservationExtendStayRoutes } from "./routes/reservations-extend-stay.r
 export { reservationRoomOperationRoutes } from "./routes/reservations-room-operations.routes.js";
 export { reservationExperienceBillRoutes } from "./routes/reservations-experience-bill.routes.js";
 export { reservationCancelRoutes } from "./routes/reservations-cancel.routes.js";
+export { reservationNoShowRoutes } from "./routes/reservations-no-show.routes.js";
 export { reservationCancellationSettlementRoutes } from "./routes/reservations-cancellation-settlement.routes.js";
 export { reservationRefundRoutes } from "./routes/reservations-refund.routes.js";
 export { reservationRefundProcessingRoutes } from "./routes/reservations-refund-processing.routes.js";

@@ -150,6 +150,7 @@ export async function getRevenueReport(
       bookingCode: reservations.bookingCode,
       source: reservations.source,
       reservationStatus: reservations.reservationStatus,
+      noShowChargeAmount: reservations.noShowChargeAmount,
       paymentStatus: reservations.paymentStatus,
       checkInDate: reservations.checkInDate,
       bookingDate: sql<string>`(${reservations.createdAt} at time zone 'Asia/Jakarta')::date`,
@@ -254,7 +255,10 @@ export async function getRevenueReport(
 
   const items: RevenueReportRow[] = reservationRows.map((row) => {
     const source = row.source as RevenueReportSource;
-    const gross = grossById.get(row.id) ?? 0;
+    const gross =
+      row.reservationStatus === "no_show"
+        ? (row.noShowChargeAmount ?? 0)
+        : (grossById.get(row.id) ?? 0);
     const grossPaid = grossPaidById.get(row.id) ?? 0;
     const refunded = refundedById.get(row.id) ?? 0;
     const netPaid = Math.max(0, grossPaid - refunded);

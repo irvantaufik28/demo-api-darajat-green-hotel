@@ -5,6 +5,7 @@ export const reservationStatusEnum = appSchema.enum("reservation_status", [
   "confirmed",
   "checked_in",
   "checked_out",
+  "no_show",
   "cancelled",
   "expired",
 ]);

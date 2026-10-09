@@ -1,4 +1,7 @@
-import { reservationPaymentStatusEnum, reservationStatusEnum } from "../../db/schema/status.enums.js";
+import {
+  reservationPaymentStatusEnum,
+  reservationStatusEnum,
+} from "../../db/schema/status.enums.js";
 import type { CheckOutClock } from "./services/reservation-check-out-time.service.js";
 
 export type ReservationStatus = (typeof reservationStatusEnum.enumValues)[number];
@@ -12,17 +15,20 @@ export type OperationalStatus =
   | "due_out"
   | "overdue"
   | "checked_out"
+  | "no_show"
   | "cancelled"
   | "expired";
 
-export const reservationStatusTransitions: Record<ReservationStatus, readonly ReservationStatus[]> = {
-  pending: ["confirmed", "cancelled", "expired"],
-  confirmed: ["checked_in", "cancelled"],
-  checked_in: ["checked_out"],
-  checked_out: [],
-  cancelled: [],
-  expired: [],
-};
+export const reservationStatusTransitions: Record<ReservationStatus, readonly ReservationStatus[]> =
+  {
+    pending: ["confirmed", "cancelled", "expired"],
+    confirmed: ["checked_in", "no_show", "cancelled"],
+    checked_in: ["checked_out"],
+    checked_out: [],
+    no_show: [],
+    cancelled: [],
+    expired: [],
+  };
 
 export function canTransitionReservationStatus(
   current: ReservationStatus,
@@ -46,6 +52,8 @@ export function deriveOperationalStatus(
       return "expired";
     case "checked_out":
       return "checked_out";
+    case "no_show":
+      return "no_show";
     case "checked_in":
       return deriveCheckedInOperationalStatus(reservation.checkOutDate, clock);
     case "confirmed":

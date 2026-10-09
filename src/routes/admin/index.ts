@@ -48,6 +48,7 @@ import {
   reservationRoomOperationRoutes,
   reservationExperienceBillRoutes,
   reservationCancelRoutes,
+  reservationNoShowRoutes,
   reservationCancellationSettlementRoutes,
   reservationRefundRoutes,
   reservationRefundProcessingRoutes,
@@ -97,6 +98,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   await app.register(reservationRoomOperationRoutes, { prefix: "/reservations" });
   await app.register(reservationExperienceBillRoutes, { prefix: "/reservations" });
   await app.register(reservationCancelRoutes, { prefix: "/reservations" });
+  await app.register(reservationNoShowRoutes, { prefix: "/reservations" });
   await app.register(reservationCancellationSettlementRoutes, { prefix: "/reservations" });
   await app.register(reservationRefundRoutes, { prefix: "/reservations" });
   await app.register(reservationRefundProcessingRoutes, { prefix: "/reservations" });

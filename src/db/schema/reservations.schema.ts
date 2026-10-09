@@ -12,7 +12,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { auditTimestamps, idColumn } from "./columns.js";
+import { auditTimestamps, idColumn, rupiah } from "./columns.js";
 import { guests } from "./guests.schema.js";
 import { masterItems } from "./master_items.schema.js";
 import { users } from "./users.schema.js";
@@ -50,6 +50,11 @@ export const reservations = appSchema.table(
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
     checkedOutAt: timestamp("checked_out_at", { withTimezone: true }),
+    noShowAt: timestamp("no_show_at", { withTimezone: true }),
+    noShowReason: text("no_show_reason"),
+    noShowMarkedByUserId: uuid("no_show_marked_by_user_id").references(() => users.id),
+    noShowChargeAmount: rupiah("no_show_charge_amount"),
+    noShowSettlementSnapshot: jsonb("no_show_settlement_snapshot"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     expiredAt: timestamp("expired_at", { withTimezone: true }),
     cancellationReason: text("cancellation_reason"),

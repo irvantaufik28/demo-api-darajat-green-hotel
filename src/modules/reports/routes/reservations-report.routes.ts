@@ -31,7 +31,15 @@ const querySchema = {
     to: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     reservationStatus: {
       type: "string",
-      enum: ["pending", "confirmed", "checked_in", "checked_out", "cancelled", "expired"],
+      enum: [
+        "pending",
+        "confirmed",
+        "checked_in",
+        "checked_out",
+        "no_show",
+        "cancelled",
+        "expired",
+      ],
     },
     source: { type: "string", enum: ["website", "phone", "walk_in", "ota"] },
     roomType: { type: "string", format: "uuid" },

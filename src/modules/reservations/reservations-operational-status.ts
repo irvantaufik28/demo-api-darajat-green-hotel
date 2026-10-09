@@ -58,18 +58,17 @@ export function resolveReservationOperationalStatus(
     }
 
     const daysOverdue = Math.round(
-      (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${checkOutDate}T00:00:00Z`)) /
-        86_400_000,
+      (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${checkOutDate}T00:00:00Z`)) / 86_400_000,
     );
     const minutes = clock.minutesPastCheckOutTime;
-    const sameDayLabel = minutes < 1
-      ? "Overdue · <1m"
-      : `Overdue · ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+    const sameDayLabel =
+      minutes < 1 ? "Overdue · <1m" : `Overdue · ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
     return {
       code: "overdue",
-      label: daysOverdue === 0
-        ? sameDayLabel
-        : `Overdue - ${daysOverdue} ${daysOverdue === 1 ? "Day" : "Days"}`,
+      label:
+        daysOverdue === 0
+          ? sameDayLabel
+          : `Overdue - ${daysOverdue} ${daysOverdue === 1 ? "Day" : "Days"}`,
       description: "Tamu masih checked-in setelah melewati jadwal checkout.",
       daysOverdue,
     };
@@ -77,6 +76,9 @@ export function resolveReservationOperationalStatus(
 
   if (reservationStatus === "checked_out") {
     return { code: "checked_out", label: "Checked Out", description: "Stay telah selesai." };
+  }
+  if (reservationStatus === "no_show") {
+    return { code: "no_show", label: "No Show", description: "Tamu tidak datang." };
   }
   if (reservationStatus === "cancelled") {
     return { code: "cancelled", label: "Cancelled", description: "Booking dibatalkan." };

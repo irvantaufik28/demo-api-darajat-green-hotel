@@ -109,12 +109,13 @@ export const reservationPaymentRoutes: FastifyPluginAsync = async (app) => {
             };
           }
           if (
+            reservation.reservationStatus === "no_show" ||
             reservation.reservationStatus === "cancelled" ||
             reservation.reservationStatus === "expired"
           ) {
             throw new PaymentInputError(
               "PAYMENT_NOT_ALLOWED",
-              "Payment cannot be recorded for a cancelled or expired reservation",
+              "Payment cannot be recorded for a no-show, cancelled, or expired reservation",
               409,
             );
           }

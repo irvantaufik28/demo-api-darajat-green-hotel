@@ -55,6 +55,7 @@ export type ReservationReportSummary = {
   confirmed: number;
   checkedIn: number;
   checkedOut: number;
+  noShow: number;
   cancelled: number;
   expired: number;
   roomNights: number;
@@ -136,6 +137,7 @@ export async function getReservationsReport(
           Number,
         ),
         reservationStatus: reservations.reservationStatus,
+        noShowChargeAmount: reservations.noShowChargeAmount,
         paymentStatus: reservations.paymentStatus,
         guestFullName: guests.fullName,
         guestPhone: guests.phone,
@@ -174,6 +176,10 @@ export async function getReservationsReport(
         ),
       checkedOut:
         sql<number>`count(*) filter (where ${reservations.reservationStatus} = 'checked_out')::int`.mapWith(
+          Number,
+        ),
+      noShow:
+        sql<number>`count(*) filter (where ${reservations.reservationStatus} = 'no_show')::int`.mapWith(
           Number,
         ),
       cancelled:
@@ -275,7 +281,10 @@ export async function getReservationsReport(
   const items: ReservationReportRow[] = pageRows.map((row) => {
     const roomQuantity = Math.max(1, roomCountByReservation.get(row.id) ?? 0);
     const nights = Math.max(1, row.nights);
-    const bookingTotal = chargesById.get(row.id) ?? 0;
+    const bookingTotal =
+      row.reservationStatus === "no_show"
+        ? (row.noShowChargeAmount ?? 0)
+        : (chargesById.get(row.id) ?? 0);
     const netPaid = Math.max(0, (paymentsById.get(row.id) ?? 0) - (refundsById.get(row.id) ?? 0));
     const isInactive = inactiveStatuses.includes(row.reservationStatus);
     const paid = isInactive ? 0 : netPaid;
@@ -314,6 +323,7 @@ export async function getReservationsReport(
     confirmed: summaryRow?.confirmed ?? 0,
     checkedIn: summaryRow?.checkedIn ?? 0,
     checkedOut: summaryRow?.checkedOut ?? 0,
+    noShow: summaryRow?.noShow ?? 0,
     cancelled: summaryRow?.cancelled ?? 0,
     expired: summaryRow?.expired ?? 0,
     roomNights: roomNightsRow[0]?.roomNights ?? 0,
@@ -337,7 +347,11 @@ async function computeFinancialSnapshot(
   whereClause: ReturnType<typeof and>,
 ): Promise<ReservationReportFinancial> {
   const activeIdsRows = await db
-    .select({ id: reservations.id })
+    .select({
+      id: reservations.id,
+      reservationStatus: reservations.reservationStatus,
+      noShowChargeAmount: reservations.noShowChargeAmount,
+    })
     .from(reservations)
     .innerJoin(guests, eq(reservations.guestId, guests.id))
     .where(
@@ -348,6 +362,7 @@ async function computeFinancialSnapshot(
           "confirmed",
           "checked_in",
           "checked_out",
+          "no_show",
         ]),
       ),
     );
@@ -357,13 +372,15 @@ async function computeFinancialSnapshot(
     return { bookingValue: 0, paid: 0, outstanding: 0 };
   }
 
-  const [[chargeRow], paymentRows, refundRows] = await Promise.all([
+  const [chargeRows, paymentRows, refundRows] = await Promise.all([
     db
       .select({
+        reservationId: reservationCharges.reservationId,
         amount: sql<number>`coalesce(sum(${reservationCharges.amount}), 0)::bigint`.mapWith(Number),
       })
       .from(reservationCharges)
-      .where(inArray(reservationCharges.reservationId, activeIds)),
+      .where(inArray(reservationCharges.reservationId, activeIds))
+      .groupBy(reservationCharges.reservationId),
     db
       .select({
         reservationId: payments.reservationId,
@@ -393,7 +410,15 @@ async function computeFinancialSnapshot(
   const paymentsById = new Map(paymentRows.map((row) => [row.reservationId, row.amount]));
   const refundsById = new Map(refundRows.map((row) => [row.reservationId, row.amount]));
 
-  const bookingValue = chargeRow?.amount ?? 0;
+  const chargeById = new Map(chargeRows.map((row) => [row.reservationId, row.amount]));
+  const bookingValue = activeIdsRows.reduce(
+    (sum, row) =>
+      sum +
+      (row.reservationStatus === "no_show"
+        ? (row.noShowChargeAmount ?? 0)
+        : (chargeById.get(row.id) ?? 0)),
+    0,
+  );
   let paid = 0;
   for (const id of activeIds) {
     paid += Math.max(0, (paymentsById.get(id) ?? 0) - (refundsById.get(id) ?? 0));

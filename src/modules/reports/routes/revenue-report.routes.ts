@@ -34,7 +34,15 @@ const querySchema = {
     },
     reservationStatus: {
       type: "string",
-      enum: ["pending", "confirmed", "checked_in", "checked_out", "cancelled", "expired"],
+      enum: [
+        "pending",
+        "confirmed",
+        "checked_in",
+        "checked_out",
+        "no_show",
+        "cancelled",
+        "expired",
+      ],
     },
     methodId: { type: "string", format: "uuid" },
     roomType: { type: "string", format: "uuid" },

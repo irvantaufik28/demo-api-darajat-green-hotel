@@ -13,7 +13,7 @@ type ListQuery = {
   search?: string;
   source?: "website" | "phone" | "walk_in" | "ota";
   reservationStatus?:
-    "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled" | "expired";
+    "pending" | "confirmed" | "checked_in" | "checked_out" | "no_show" | "cancelled" | "expired";
   paymentStatus?: "unpaid" | "partial" | "paid" | "failed" | "expired" | "refunded";
   stayDate?: string;
   sort?: "newest" | "booking_code_asc" | "booking_code_desc";
@@ -29,7 +29,15 @@ const listQuerySchema = {
     source: { type: "string", enum: ["website", "phone", "walk_in", "ota"] },
     reservationStatus: {
       type: "string",
-      enum: ["pending", "confirmed", "checked_in", "checked_out", "cancelled", "expired"],
+      enum: [
+        "pending",
+        "confirmed",
+        "checked_in",
+        "checked_out",
+        "no_show",
+        "cancelled",
+        "expired",
+      ],
     },
     paymentStatus: {
       type: "string",
