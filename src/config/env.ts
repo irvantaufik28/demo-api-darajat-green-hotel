@@ -18,6 +18,17 @@ export type AppConfig = {
     apiSecret: string;
     folder: string;
   } | null;
+  email: {
+    provider: "gmail";
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    password: string;
+    fromAddress: string;
+    fromName: string;
+    replyTo: string;
+  } | null;
 };
 
 const environments = ["development", "production", "test"] as const;
@@ -66,6 +77,15 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   const apiSecret =
     cloudinaryCredentials?.apiSecret ?? environment.CLOUDINARY_API_SECRET?.trim() ?? "";
   const folder = environment.CLOUDINARY_UPLOAD_FOLDER?.trim() || "greenhero";
+  const emailProvider = environment.EMAIL_PROVIDER?.trim() ?? "";
+  const emailHost = environment.EMAIL_HOST?.trim() ?? "";
+  const emailPort = Number(environment.EMAIL_PORT ?? "465");
+  const emailSecure = (environment.EMAIL_SECURE ?? "true").trim().toLowerCase() === "true";
+  const emailUser = environment.EMAIL_USER?.trim() ?? "";
+  const emailPassword = environment.EMAIL_PASSWORD?.replace(/\s/g, "") ?? "";
+  const emailFromAddress = environment.EMAIL_FROM_ADDRESS?.trim() ?? "";
+  const emailFromName = environment.EMAIL_FROM_NAME?.trim() ?? "";
+  const emailReplyTo = environment.EMAIL_REPLY_TO?.trim() ?? "";
 
   if (!environments.includes(nodeEnv as AppConfig["nodeEnv"])) {
     throw new Error("NODE_ENV must be development, production, or test");
@@ -149,6 +169,29 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   if (!/^[a-zA-Z0-9_/-]+$/.test(folder) || folder.startsWith("/") || folder.endsWith("/")) {
     throw new Error("CLOUDINARY_UPLOAD_FOLDER contains invalid characters");
   }
+  const emailValues = [
+    emailProvider,
+    emailHost,
+    emailUser,
+    emailPassword,
+    emailFromAddress,
+    emailFromName,
+    emailReplyTo,
+  ];
+  if (emailValues.some(Boolean) && !emailValues.every(Boolean)) {
+    throw new Error(
+      "EMAIL_PROVIDER, EMAIL_HOST, EMAIL_USER, EMAIL_PASSWORD, EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME, and EMAIL_REPLY_TO must be set together",
+    );
+  }
+  if (emailProvider && emailProvider !== "gmail") {
+    throw new Error("EMAIL_PROVIDER must be gmail");
+  }
+  if (emailProvider && (!Number.isInteger(emailPort) || emailPort < 1 || emailPort > 65535)) {
+    throw new Error("EMAIL_PORT must be an integer between 1 and 65535");
+  }
+  if (emailProvider && emailPort === 465 && !emailSecure) {
+    throw new Error("EMAIL_SECURE must be true when EMAIL_PORT is 465");
+  }
 
   return {
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
@@ -167,5 +210,18 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
         }
       : null,
     cloudinary: cloudName && apiKey && apiSecret ? { cloudName, apiKey, apiSecret, folder } : null,
+    email: emailProvider
+      ? {
+          provider: "gmail",
+          host: emailHost,
+          port: emailPort,
+          secure: emailSecure,
+          user: emailUser,
+          password: emailPassword,
+          fromAddress: emailFromAddress,
+          fromName: emailFromName,
+          replyTo: emailReplyTo,
+        }
+      : null,
   };
 }

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
+import { emailOutbox } from "../../../db/schema/email_outbox.schema.js";
+import { guests } from "../../../db/schema/guests.schema.js";
 import { masterItems } from "../../../db/schema/master_items.schema.js";
 import { paymentSessions } from "../../../db/schema/payment_sessions.schema.js";
 import { paymentWebhookEvents } from "../../../db/schema/payment_webhook_events.schema.js";
@@ -314,6 +316,23 @@ export async function processXenditWebhook(db: Database, rawPayload: unknown) {
         updatedAt: now,
       })
       .where(eq(reservations.id, reservation.id));
+    if (shouldConfirm) {
+      const [guest] = await tx
+        .select({ email: guests.email })
+        .from(guests)
+        .where(eq(guests.id, reservation.guestId))
+        .limit(1);
+      if (guest?.email) {
+        await tx
+          .insert(emailOutbox)
+          .values({
+            reservationId: reservation.id,
+            template: "reservation_voucher",
+            recipient: guest.email.trim().toLowerCase(),
+          })
+          .onConflictDoNothing();
+      }
+    }
     if (!existingPayment) {
       await recordReservationEvent(tx, {
         reservationId: reservation.id,

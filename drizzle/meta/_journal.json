@@ -148,6 +148,13 @@
       "when": 1791484151913,
       "tag": "0020_sturdy_morph",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791529168000,
+      "tag": "0021_fuzzy_weapon_omega",
+      "breakpoints": true
     }
   ]
 }

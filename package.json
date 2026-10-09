@@ -11,8 +11,10 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
+    "worker:email": "node --env-file-if-exists=.env --import tsx src/email-worker.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/server.js",
+    "start:email-worker": "node --env-file-if-exists=.env dist/email-worker.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -35,11 +37,13 @@
     "drizzle-orm": "^0.45.3",
     "fastify": "^5.12.5",
     "file-type": "^22.1.1",
+    "nodemailer": "^10.0.16",
     "pdf-lib": "^1.17.1",
     "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
     "prettier": "^3.9.9",

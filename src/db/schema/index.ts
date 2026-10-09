@@ -8,6 +8,7 @@ export * from "./cancellation_policies.schema.js";
 export * from "./cancellation_policy_room_types.schema.js";
 export * from "./cancellation_rules.schema.js";
 export * from "./experiences.schema.js";
+export * from "./email_outbox.schema.js";
 export * from "./experience_variants.schema.js";
 export * from "./featured_room_types.schema.js";
 export * from "./gallery_images.schema.js";
