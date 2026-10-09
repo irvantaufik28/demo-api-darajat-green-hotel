@@ -7,6 +7,7 @@ import { publicRoomsRoutes } from "../../modules/rooms/index.js";
 import { publicBookingExtrasRoutes } from "../../modules/booking-extras/index.js";
 import {
   publicReservationCreateRoutes,
+  publicReservationLookupRoutes,
   publicReservationPaymentSessionRoutes,
   publicReservationPaymentStatusRoutes,
 } from "../../modules/reservations/index.js";
@@ -18,6 +19,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
   await app.register(publicRoomsRoutes, { prefix: "/rooms" });
   await app.register(publicBookingExtrasRoutes, { prefix: "/booking" });
   await app.register(publicReservationCreateRoutes, { prefix: "/reservations" });
+  await app.register(publicReservationLookupRoutes, { prefix: "/reservations" });
   await app.register(publicReservationPaymentSessionRoutes, { prefix: "/reservations" });
   await app.register(publicReservationPaymentStatusRoutes, { prefix: "/reservations" });
   await app.register(xenditWebhookRoutes, { prefix: "/webhooks" });

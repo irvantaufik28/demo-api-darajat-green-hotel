@@ -1,4 +1,5 @@
 export { publicReservationCreateRoutes } from "./routes/public-reservations-create.routes.js";
+export { publicReservationLookupRoutes } from "./routes/public-reservations-lookup.routes.js";
 export { publicReservationPaymentSessionRoutes } from "./routes/public-reservations-payment-session.routes.js";
 export { publicReservationPaymentStatusRoutes } from "./routes/public-reservations-payment-status.routes.js";
 export { reservationListRoutes } from "./routes/reservations-list.routes.js";
